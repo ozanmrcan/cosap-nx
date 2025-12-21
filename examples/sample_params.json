@@ -1,0 +1,10 @@
+{
+  "sample_id": "NA12878_exome",
+  "bam": "/data/NA12878_exome.bam",
+  "ref_fasta": "/refs/hg38.fa",
+  "outdir": "./results",
+  "model_type": "WES",
+  "gvcf": false,
+  "cpus": 8,
+  "memory": "16 GB"
+}
