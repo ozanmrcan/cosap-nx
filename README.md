@@ -1,12 +1,23 @@
-# COSAP-NX v0.1
+# COSAP-NX v0.1.2
 
 COSAP-like pipeline builder with **Nextflow** as the execution backend.
 
-## v0.1 Scope
+## Version History
 
-**BAM → DeepVariant → VCF** (germline variant calling)
+### v0.1.2 (Current)
+**FASTQ → BWA-MEM → sorted BAM → DeepVariant → VCF**
 
-This is a minimal vertical slice to prove the architecture before expanding.
+- ✅ FASTQ alignment support (BWA-MEM)
+- ✅ Automated BAM sorting and indexing
+- ✅ Backward compatible with v0.1.0 (BAM input still works)
+- ✅ Comprehensive documentation
+
+### v0.1.0
+**BAM → DeepVariant → VCF**
+
+- Minimal vertical slice demonstrating the architecture
+- BAM-only input
+- DeepVariant germline calling
 
 ## Requirements
 
@@ -34,16 +45,16 @@ pip install -e .
 
 ## Quick Start
 
-### Option 1: Python API (COSAP-like)
+### Option 1: Python API with BAM Input
 
 ```python
 from cosap_nx import BamReader, VariantCaller, Pipeline, PipelineRunner
 
-# Define input
+# Define BAM input
 bam = BamReader("/data/NA12878.bam", name="NA12878")
 
 # Configure variant caller
-dv = VariantCaller(
+caller = VariantCaller(
     library="deepvariant",
     normal_sample=bam,
     params={"model_type": "WGS"},
@@ -51,14 +62,44 @@ dv = VariantCaller(
 )
 
 # Build and run pipeline
-pipeline = Pipeline()
-pipeline.set_reference("/refs/hg38.fa")
-pipeline.add(dv)
+pipeline = Pipeline(ref_fasta="/refs/hg38.fa")
+pipeline.add(caller)
 
 config_path = pipeline.build(workdir="./workdir")
 
 runner = PipelineRunner()
-runner.run_pipeline(config_path, profile="docker")
+runner.run_pipeline(config_path)
+```
+
+### Option 2: Python API with FASTQ Input (v0.1.2+)
+
+```python
+from cosap_nx import FastqReader, VariantCaller, Pipeline, PipelineRunner
+
+# Define FASTQ inputs (paired-end)
+fq_r1 = FastqReader("/data/sample_R1.fastq.gz", read=1, name="MySample")
+fq_r2 = FastqReader("/data/sample_R2.fastq.gz", read=2, name="MySample")
+
+# Configure variant caller with FASTQ input
+caller = VariantCaller(
+    library="deepvariant",
+    normal_sample=[fq_r1, fq_r2],  # List of FastqReaders
+    params={"model_type": "WGS"}
+)
+
+# Build and run pipeline
+pipeline = Pipeline(ref_fasta="/refs/hg38.fa")  # Must be BWA-indexed!
+pipeline.add(caller)
+
+config_path = pipeline.build(workdir="./workdir", cpus=8, memory="16 GB")
+
+runner = PipelineRunner()
+runner.run_pipeline(config_path)
+```
+
+**Note:** For FASTQ input, the reference must be BWA-indexed:
+```bash
+bwa index /refs/hg38.fa
 ```
 
 ### Option 2: Direct Nextflow (for testing)
@@ -129,7 +170,8 @@ cosap-nx/
 
 ## Roadmap
 
-- [x] v0.1: BAM → DeepVariant → VCF
-- [ ] v0.2: FASTQ → BAM (alignment)
-- [ ] v0.3: Multiple callers (HaplotypeCaller)
-- [ ] v0.4: Annotation (VEP/ANNOVAR)
+- [x] v0.1.0: BAM → DeepVariant → VCF
+- [x] v0.1.2: FASTQ → BAM (BWA-MEM alignment)
+- [ ] v0.2.0: Preprocessing (Mark Duplicates + BQSR)
+- [ ] v0.3.0: Multiple callers (HaplotypeCaller, Mutect2)
+- [ ] v0.4.0: Annotation (VEP/ANNOVAR)

@@ -82,23 +82,94 @@ print(bam.name)  # "Patient_001"
 - BAM file must exist
 - BAM index must exist (`.bam.bai` or `.bai`)
 
+### Step 1b: FastqReader (v0.1.2+)
+
+**NEW in v0.1.2:** You can now start from FASTQ files instead of BAM!
+
+`FastqReader` wraps FASTQ files for alignment:
+
+```python
+from cosap_nx import FastqReader
+
+# Paired-end reads (most common)
+fastq_r1 = FastqReader("/data/sample_R1.fastq.gz", read=1, name="MySample")
+fastq_r2 = FastqReader("/data/sample_R2.fastq.gz", read=2, name="MySample")
+
+# Name is auto-extracted if not provided
+fastq_r1 = FastqReader("/data/NA12878_R1.fastq.gz", read=1)
+print(fastq_r1.name)  # "NA12878"
+```
+
+**Key points:**
+- Always create **2 FastqReader instances** for paired-end data (read=1 and read=2)
+- Both must have the **same name** (will be checked during validation)
+- FASTQ files can be gzipped (`.fastq.gz`) or uncompressed (`.fastq`)
+
+**Prerequisites for FASTQ mode:**
+The reference genome must be indexed with BWA:
+
+```bash
+bwa index /path/to/reference.fasta
+```
+
+This creates `.amb`, `.ann`, `.bwt`, `.pac`, `.sa` index files.
+
+**Example: FASTQ to VCF**
+
+```python
+from cosap_nx import FastqReader, VariantCaller, Pipeline, PipelineRunner
+
+# Define paired-end FASTQ inputs
+fastq_r1 = FastqReader("sample_R1.fastq.gz", read=1, name="MySample")
+fastq_r2 = FastqReader("sample_R2.fastq.gz", read=2, name="MySample")
+
+# Pass list of FastqReaders to VariantCaller
+caller = VariantCaller(
+    library="deepvariant",
+    normal_sample=[fastq_r1, fastq_r2],  # List, not single file!
+    params={"model_type": "WGS"}
+)
+
+# Build and run (same as BAM mode)
+pipeline = Pipeline(ref_fasta="reference.fasta")
+pipeline.add(caller)
+config_path = pipeline.build(workdir="./workdir", cpus=8, memory="16 GB")
+
+runner = PipelineRunner()
+runner.run_pipeline(config_path)
+```
+
+**Outputs:**
+- Aligned BAM: `workdir/results/bam/MySample.bam`
+- Variants VCF: `workdir/results/vcf/deepvariant/MySample.vcf.gz`
+
 ### Step 2: VariantCaller
 
-`VariantCaller` configures which tool to use and how:
+`VariantCaller` configures which tool to use and how.
+
+**Accepts either:**
+- **BAM input:** Single `BamReader` instance (v0.1.0 behavior)
+- **FASTQ input:** List of 2 `FastqReader` instances (v0.1.2+)
 
 ```python
 from cosap_nx import VariantCaller
 
-# Basic DeepVariant call
+# Option 1: BAM input
 caller = VariantCaller(
     library="deepvariant",
-    normal_sample=bam
+    normal_sample=bam  # Single BamReader
 )
 
-# With options
+# Option 2: FASTQ input (v0.1.2+)
 caller = VariantCaller(
     library="deepvariant",
-    normal_sample=bam,
+    normal_sample=[fastq_r1, fastq_r2]  # List of FastqReaders
+)
+
+# With custom parameters
+caller = VariantCaller(
+    library="deepvariant",
+    normal_sample=bam,  # or [fastq_r1, fastq_r2]
     params={
         "model_type": "WES",           # WGS, WES, or PACBIO
         "germline_sample_name": "NA12878"
@@ -107,7 +178,7 @@ caller = VariantCaller(
 )
 ```
 
-**Supported libraries (v0.1):**
+**Supported libraries (v0.1.2):**
 - `deepvariant` - Google's deep learning variant caller
 
 **Model types:**

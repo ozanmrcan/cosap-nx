@@ -7,7 +7,7 @@ Complete reference for all COSAP-NX classes and methods.
 ## Module: cosap_nx
 
 ```python
-from cosap_nx import BamReader, VariantCaller, Pipeline, PipelineRunner
+from cosap_nx import BamReader, FastqReader, VariantCaller, Pipeline, PipelineRunner
 ```
 
 ---
@@ -70,6 +70,77 @@ print(bam2.name)  # "Patient_001"
 
 ---
 
+## FastqReader
+
+**(NEW in v0.1.2)**
+
+Represents an input FASTQ file for alignment.
+
+### Constructor
+
+```python
+FastqReader(filename: str, read: int, name: str = None, platform: str = "ILLUMINA")
+```
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `filename` | `str` | Yes | Path to FASTQ file (`.fastq` or `.fastq.gz`) |
+| `read` | `int` | Yes | Read number: `1` or `2` for paired-end sequencing |
+| `name` | `str` | No | Sample name. If not provided, auto-extracted from filename |
+| `platform` | `str` | No | Sequencing platform (default: `"ILLUMINA"`) |
+
+### Attributes
+
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| `filename` | `str` | Absolute path to FASTQ file |
+| `read` | `int` | Read number (1 or 2) |
+| `name` | `str` | Sample identifier |
+| `platform` | `str` | Sequencing platform |
+
+### Methods
+
+#### `get_output() -> str`
+
+Returns the absolute path to the FASTQ file.
+
+```python
+fq = FastqReader("/data/sample_R1.fastq.gz", read=1)
+print(fq.get_output())  # "/data/sample_R1.fastq.gz"
+```
+
+#### `validate() -> None`
+
+Checks that the FASTQ file exists. Raises `FileNotFoundError` if not found.
+
+```python
+fq = FastqReader("/data/sample_R1.fastq.gz", read=1)
+fq.validate()  # Raises FileNotFoundError if file missing
+```
+
+### Example
+
+```python
+from cosap_nx import FastqReader
+
+# Auto-extract name from filename
+fq1 = FastqReader("/data/NA12878_R1.fastq.gz", read=1)
+print(fq1.name)  # "NA12878"
+
+# Specify custom name (must match between R1 and R2!)
+fq_r1 = FastqReader("/data/sample_1.fastq.gz", read=1, name="Patient_001")
+fq_r2 = FastqReader("/data/sample_2.fastq.gz", read=2, name="Patient_001")
+```
+
+### Important Notes
+
+- For paired-end sequencing, create **two FastqReader instances** (read=1 and read=2)
+- Both instances must have the **same `name`** (validated by VariantCaller)
+- Sample name auto-extraction removes common suffixes: `_R1`, `_1`, `.R1`, `.1`, `_R2`, `_2`, `.R2`, `.2`
+- Read number must be `1` or `2` (raises `ValueError` otherwise)
+
+---
+
 ## VariantCaller
 
 Configures variant calling for a sample.
@@ -79,9 +150,9 @@ Configures variant calling for a sample.
 ```python
 VariantCaller(
     library: str,
-    normal_sample: BamReader = None,
-    germline: BamReader = None,      # Alias for normal_sample
-    tumor_sample: BamReader = None,  # Not supported in v0.1
+    normal_sample: Union[BamReader, List[FastqReader]] = None,
+    germline: Union[BamReader, List[FastqReader]] = None,  # Alias for normal_sample
+    tumor_sample: Union[BamReader, List[FastqReader]] = None,  # Not supported in v0.1.2
     params: Dict[str, Any] = {},
     gvcf: bool = False,
     name: str = None
@@ -90,10 +161,10 @@ VariantCaller(
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `library` | `str` | Yes | Variant caller to use. v0.1 supports: `"deepvariant"` |
-| `normal_sample` | `BamReader` | Yes | Input BAM for germline calling |
-| `germline` | `BamReader` | No | Alias for `normal_sample` (COSAP compatibility) |
-| `tumor_sample` | `BamReader` | No | Not supported in v0.1 |
+| `library` | `str` | Yes | Variant caller to use. v0.1.2 supports: `"deepvariant"` |
+| `normal_sample` | `BamReader` or `List[FastqReader]` | Yes | **BAM:** Single `BamReader` instance<br>**FASTQ:** List of 2 `FastqReader` instances (paired-end) |
+| `germline` | `BamReader` or `List[FastqReader]` | No | Alias for `normal_sample` (COSAP compatibility) |
+| `tumor_sample` | `BamReader` or `List[FastqReader]` | No | Not supported in v0.1.2 |
 | `params` | `dict` | No | Tool-specific parameters |
 | `gvcf` | `bool` | No | Output gVCF in addition to VCF (default: `False`) |
 | `name` | `str` | No | Step name. Auto-generated if not provided |

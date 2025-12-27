@@ -1,30 +1,36 @@
 #!/usr/bin/env nextflow
 
 /*
- * COSAP-NX v0.1 - Germline Variant Calling Pipeline
- * BAM -> DeepVariant -> VCF
+ * COSAP-NX v0.1.2 - Germline Variant Calling Pipeline
+ * FASTQ -> BWA-MEM -> sorted BAM -> DeepVariant -> VCF
+ * OR
+ * BAM -> DeepVariant -> VCF (backward compatible with v0.1.0)
  */
 
 nextflow.enable.dsl = 2
 
 // Validate required parameters
-if (!params.bam) {
-    error "Parameter 'bam' is required"
+if (!params.bam && (!params.fastq_r1 || !params.fastq_r2)) {
+    error "Must provide either --bam or both --fastq_r1 and --fastq_r2"
 }
 if (!params.ref_fasta) {
     error "Parameter 'ref_fasta' is required"
 }
 
 // Log pipeline info
+def input_type = params.bam ? "BAM" : "FASTQ"
+def input_files = params.bam ? params.bam : "${params.fastq_r1}, ${params.fastq_r2}"
+
 log.info """
 ╔═══════════════════════════════════════════════════════════════╗
-║                     COSAP-NX v0.1                             ║
+║                    COSAP-NX v0.1.2                            ║
 ║            Germline Variant Calling Pipeline                  ║
 ╚═══════════════════════════════════════════════════════════════╝
 
 Parameters:
   - Sample ID    : ${params.sample_id}
-  - BAM          : ${params.bam}
+  - Input type   : ${input_type}
+  - Input files  : ${input_files}
   - Reference    : ${params.ref_fasta}
   - Model type   : ${params.model_type}
   - Output GVCF  : ${params.gvcf}
@@ -32,6 +38,41 @@ Parameters:
   - CPUs         : ${params.cpus}
   - Memory       : ${params.memory}
 """
+
+/*
+ * Process: BWA_ALIGN
+ * Align FASTQ reads to reference genome using BWA-MEM
+ */
+process BWA_ALIGN {
+    tag "${sample_id}"
+    // Mulled container with bwa 0.7.17 + samtools 1.15.1
+    container 'quay.io/biocontainers/mulled-v2-fe8faa35dbf6dc65a0f7f5d4ea12e31a79f73e40:66ed1b38d280722529bb8a0167b0cf02f8a0b488-0'
+    cpus params.cpus
+    memory params.memory
+
+    publishDir "${params.outdir}/bam", mode: 'copy'
+
+    input:
+    tuple val(sample_id), path(read1), path(read2)
+    path ref_fasta
+    path ref_fasta_fai
+    path bwa_index_files  // .amb, .ann, .bwt, .pac, .sa (as list)
+
+    output:
+    tuple val(sample_id), path("${sample_id}.bam"), path("${sample_id}.bam.bai"), emit: bam
+
+    script:
+    def read_group = "@RG\\tID:${sample_id}\\tSM:${sample_id}\\tPL:ILLUMINA\\tLB:${sample_id}"
+    """
+    # Align with BWA-MEM, add read groups, pipe to samtools sort
+    bwa mem -t ${task.cpus} -R '${read_group}' \\
+        ${ref_fasta} ${read1} ${read2} | \\
+    samtools sort -@ ${task.cpus} -o ${sample_id}.bam -
+
+    # Index the sorted BAM
+    samtools index ${sample_id}.bam
+    """
+}
 
 /*
  * Process: DEEPVARIANT_CALL
@@ -79,18 +120,7 @@ process DEEPVARIANT_CALL {
  * Main workflow
  */
 workflow {
-    // Create input channels
-    bam_ch = Channel.fromPath(params.bam, checkIfExists: true)
-
-    // Find BAM index - try .bam.bai first, then .bai
-    def bam_bai = file("${params.bam}.bai")
-    def alt_bai = file("${params.bam}".replace('.bam', '.bai'))
-    def bam_index_file = bam_bai.exists() ? bam_bai : alt_bai
-    if (!bam_index_file.exists()) {
-        error "BAM index not found. Tried: ${bam_bai} and ${alt_bai}"
-    }
-    bam_index_ch = Channel.fromPath(bam_index_file)
-
+    // Common reference channels
     ref_ch = Channel.fromPath(params.ref_fasta, checkIfExists: true)
     ref_fai_ch = Channel.fromPath("${params.ref_fasta}.fai", checkIfExists: true)
 
@@ -98,22 +128,64 @@ workflow {
     def ref_dict_file = file("${params.ref_fasta}.dict")
     ref_dict_ch = ref_dict_file.exists() ? Channel.fromPath(ref_dict_file) : Channel.of(file('NO_DICT'))
 
-    // Combine BAM with index
-    bam_tuple = Channel.of(params.sample_id)
-        .combine(bam_ch)
-        .combine(bam_index_ch)
+    // Branch based on input type
+    if (params.fastq_r1 && params.fastq_r2) {
+        // FASTQ mode: Align reads with BWA-MEM first
+        log.info "Running FASTQ mode: Alignment + Variant Calling"
 
-    // Run DeepVariant
-    DEEPVARIANT_CALL(
-        bam_tuple,
-        ref_ch,
-        ref_fai_ch,
-        ref_dict_ch
-    )
+        // Check for BWA index files
+        bwa_index_files = Channel.fromPath("${params.ref_fasta}.{amb,ann,bwt,pac,sa}")
+            .collect()
+            .ifEmpty { error "BWA index not found. Run: bwa index ${params.ref_fasta}" }
 
-    // Log completion
-    DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
-        "Completed: ${sample_id} -> ${vcf}"
+        // Create FASTQ input channels
+        fastq_r1_ch = Channel.fromPath(params.fastq_r1, checkIfExists: true)
+        fastq_r2_ch = Channel.fromPath(params.fastq_r2, checkIfExists: true)
+
+        // Combine into tuple (sample_id, read1, read2)
+        fastq_tuple = Channel.of(params.sample_id)
+            .combine(fastq_r1_ch)
+            .combine(fastq_r2_ch)
+
+        // Run alignment
+        BWA_ALIGN(fastq_tuple, ref_ch, ref_fai_ch, bwa_index_files)
+
+        // Feed aligned BAM to variant caller
+        DEEPVARIANT_CALL(BWA_ALIGN.out.bam, ref_ch, ref_fai_ch, ref_dict_ch)
+
+        // Log completion
+        DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
+            "Completed: ${sample_id} -> ${vcf}"
+        }
+
+    } else if (params.bam) {
+        // BAM mode: Skip alignment (v0.1 backward compatibility)
+        log.info "Running BAM mode: Variant Calling only"
+
+        // Create BAM input channels
+        bam_ch = Channel.fromPath(params.bam, checkIfExists: true)
+
+        // Find BAM index - try .bam.bai first, then .bai
+        def bam_bai = file("${params.bam}.bai")
+        def alt_bai = file("${params.bam}".replace('.bam', '.bai'))
+        def bam_index_file = bam_bai.exists() ? bam_bai : alt_bai
+        if (!bam_index_file.exists()) {
+            error "BAM index not found. Tried: ${bam_bai} and ${alt_bai}"
+        }
+        bam_index_ch = Channel.fromPath(bam_index_file)
+
+        // Combine BAM with index
+        bam_tuple = Channel.of(params.sample_id)
+            .combine(bam_ch)
+            .combine(bam_index_ch)
+
+        // Run DeepVariant
+        DEEPVARIANT_CALL(bam_tuple, ref_ch, ref_fai_ch, ref_dict_ch)
+
+        // Log completion
+        DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
+            "Completed: ${sample_id} -> ${vcf}"
+        }
     }
 }
 

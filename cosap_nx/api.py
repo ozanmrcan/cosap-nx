@@ -7,9 +7,10 @@ that generate Nextflow-compatible configuration.
 
 import json
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 
 @dataclass
@@ -49,22 +50,73 @@ class BamReader:
 
 
 @dataclass
+class FastqReader:
+    """
+    Represents an input FASTQ file for alignment.
+
+    For paired-end sequencing, create two FastqReader instances (read=1, read=2).
+
+    Args:
+        filename: Path to FASTQ file (.fastq or .fastq.gz)
+        read: Read number (1 or 2 for paired-end)
+        name: Sample name (auto-extracted from filename if not provided)
+        platform: Sequencing platform (default: "ILLUMINA")
+    """
+
+    filename: str
+    read: int
+    name: Optional[str] = None
+    platform: str = "ILLUMINA"
+
+    def __post_init__(self):
+        # Normalize path
+        self.filename = os.path.abspath(os.path.normpath(self.filename))
+
+        # Validate file exists
+        if not os.path.isfile(self.filename):
+            raise FileNotFoundError(f"FASTQ file not found: {self.filename}")
+
+        # Auto-extract sample name from filename if not provided
+        if self.name is None:
+            basename = os.path.basename(self.filename)
+            # Remove common suffixes: _1.fastq.gz, _R1.fastq.gz, .R1.fastq, etc.
+            self.name = re.sub(r'[._][Rr]?[12]\.f(ast)?q(\.gz)?$', '', basename)
+
+        # Validate read number
+        if self.read not in [1, 2]:
+            raise ValueError(f"Read number must be 1 or 2, got: {self.read}")
+
+    def get_output(self) -> str:
+        """Return the path to the FASTQ file."""
+        return self.filename
+
+    def validate(self) -> None:
+        """Check that the FASTQ file exists and is readable."""
+        if not os.path.isfile(self.filename):
+            raise FileNotFoundError(f"FASTQ file not found: {self.filename}")
+
+
+@dataclass
 class VariantCaller:
     """
     Configures variant calling for a sample.
 
-    For v0.1, only 'deepvariant' is supported for germline calling.
+    Supports both BAM and FASTQ inputs:
+    - BAM: Provide a BamReader instance
+    - FASTQ: Provide a list of 2 FastqReader instances (paired-end reads)
+
+    For v0.1.2, only 'deepvariant' is supported for germline calling.
     """
 
     library: str
-    normal_sample: Optional[BamReader] = None
-    germline: Optional[BamReader] = None  # Alias for normal_sample
-    tumor_sample: Optional[BamReader] = None
+    normal_sample: Optional[Union[BamReader, List[FastqReader]]] = None
+    germline: Optional[Union[BamReader, List[FastqReader]]] = None  # Alias for normal_sample
+    tumor_sample: Optional[Union[BamReader, List[FastqReader]]] = None
     params: Dict[str, Any] = field(default_factory=dict)
     gvcf: bool = False
     name: Optional[str] = None
 
-    # Supported libraries in v0.1
+    # Supported libraries in v0.1.2
     SUPPORTED_LIBRARIES = ["deepvariant"]
 
     def __post_init__(self):
@@ -78,28 +130,65 @@ class VariantCaller:
         # Validate library
         if self.library not in self.SUPPORTED_LIBRARIES:
             raise ValueError(
-                f"Library '{self.library}' not supported in v0.1. "
+                f"Library '{self.library}' not supported in v0.1.2. "
                 f"Supported: {self.SUPPORTED_LIBRARIES}"
             )
 
-        # v0.1: Only germline calling
+        # v0.1.2: Only germline calling
         if self.tumor_sample is not None:
             raise ValueError(
-                "Somatic calling (tumor_sample) not supported in v0.1"
+                "Somatic calling (tumor_sample) not supported in v0.1.2"
             )
 
         if self.normal_sample is None:
             raise ValueError("normal_sample (germline) is required")
 
+        # Validate input type
+        if isinstance(self.normal_sample, list):
+            # FASTQ input: must have exactly 2 reads (paired-end)
+            if len(self.normal_sample) != 2:
+                raise ValueError(
+                    "FASTQ input requires paired-end reads (exactly 2 FastqReader instances)"
+                )
+            if not all(isinstance(f, FastqReader) for f in self.normal_sample):
+                raise TypeError("List input must contain FastqReader objects")
+
+            # Check read numbers are 1 and 2
+            reads = sorted([f.read for f in self.normal_sample])
+            if reads != [1, 2]:
+                raise ValueError("FASTQ reads must be numbered 1 and 2")
+
+            # Verify both FASTQs have the same sample name
+            names = set(f.name for f in self.normal_sample)
+            if len(names) > 1:
+                raise ValueError(
+                    f"FASTQ files have mismatched sample names: {names}. "
+                    "Both read 1 and read 2 must have the same 'name' parameter."
+                )
+
+        elif not isinstance(self.normal_sample, BamReader):
+            raise TypeError(
+                "normal_sample must be a BamReader or a list of 2 FastqReader objects"
+            )
+
         # Generate name if not provided
         if self.name is None:
-            self.name = f"{self.normal_sample.name}_{self.library}"
+            sample_name = self._get_sample_name()
+            self.name = f"{sample_name}_{self.library}"
+
+    def _get_sample_name(self) -> str:
+        """Get the sample name from either BAM or FASTQ input."""
+        if isinstance(self.normal_sample, BamReader):
+            return self.normal_sample.name
+        else:  # List[FastqReader]
+            # Both should have the same name (validated in __post_init__)
+            return self.normal_sample[0].name
 
     def get_sample_id(self) -> str:
         """Get the sample identifier."""
         return self.params.get(
             "germline_sample_name",
-            self.normal_sample.name
+            self._get_sample_name()
         )
 
     def get_model_type(self) -> str:
@@ -195,17 +284,23 @@ class Pipeline:
         step = self.steps[0]
 
         # Validate input files
-        step.normal_sample.validate()
+        input_sample = step.normal_sample
+        if isinstance(input_sample, BamReader):
+            # BAM input - validate BAM file
+            input_sample.validate()
+        else:  # List[FastqReader]
+            # FASTQ input - validate both FASTQ files
+            for fastq in input_sample:
+                fastq.validate()
 
         # Setup directories
         self._workdir = os.path.abspath(workdir)
         outdir = os.path.join(self._workdir, "results")
         os.makedirs(outdir, exist_ok=True)
 
-        # Build config
+        # Build config based on input type
         config = {
             "sample_id": step.get_sample_id(),
-            "bam": step.normal_sample.get_output(),
             "ref_fasta": self.ref_fasta,
             "outdir": outdir,
             "model_type": step.get_model_type(),
@@ -213,6 +308,17 @@ class Pipeline:
             "cpus": cpus,
             "memory": memory,
         }
+
+        # Add input-specific parameters
+        if isinstance(input_sample, BamReader):
+            # BAM input (v0.1 behavior)
+            config["bam"] = input_sample.get_output()
+        else:  # List[FastqReader]
+            # FASTQ input (v0.1.2 behavior)
+            fastq_r1 = next(f for f in input_sample if f.read == 1)
+            fastq_r2 = next(f for f in input_sample if f.read == 2)
+            config["fastq_r1"] = fastq_r1.get_output()
+            config["fastq_r2"] = fastq_r2.get_output()
 
         # Write params.json
         config_path = os.path.join(self._workdir, "params.json")
