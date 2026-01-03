@@ -2,17 +2,29 @@
 
 /*
  * COSAP-NX v0.1.2 - Germline Variant Calling Pipeline
- * FASTQ -> BWA-MEM -> sorted BAM -> DeepVariant -> VCF
- * OR
- * BAM -> DeepVariant -> VCF (backward compatible with v0.1.0)
+ * Modes:
+ *   1. FASTQ -> BWA-MEM -> sorted BAM (alignment only)
+ *   2. FASTQ -> BWA-MEM -> sorted BAM -> DeepVariant -> VCF
+ *   3. BAM -> DeepVariant -> VCF (backward compatible with v0.1.0)
  */
 
 nextflow.enable.dsl = 2
 
 // Validate required parameters
-if (!params.bam && (!params.fastq_r1 || !params.fastq_r2)) {
-    error "Must provide either --bam or both --fastq_r1 and --fastq_r2"
+def alignment_only = params.mode == "alignment_only"
+
+if (alignment_only) {
+    // Alignment-only mode: requires FASTQ
+    if (!params.fastq_r1 || !params.fastq_r2) {
+        error "Alignment-only mode requires both --fastq_r1 and --fastq_r2"
+    }
+} else {
+    // Variant calling mode: requires BAM or FASTQ
+    if (!params.bam && (!params.fastq_r1 || !params.fastq_r2)) {
+        error "Must provide either --bam or both --fastq_r1 and --fastq_r2"
+    }
 }
+
 if (!params.ref_fasta) {
     error "Parameter 'ref_fasta' is required"
 }
@@ -62,7 +74,8 @@ process BWA_ALIGN {
     tuple val(sample_id), path("${sample_id}.bam"), path("${sample_id}.bam.bai"), emit: bam
 
     script:
-    def read_group = "@RG\\tID:${sample_id}\\tSM:${sample_id}\\tPL:ILLUMINA\\tLB:${sample_id}"
+    // Use custom read group if provided (for Mapper), otherwise use default
+    def read_group = params.read_group ?: "@RG\\tID:${sample_id}\\tSM:${sample_id}\\tPL:ILLUMINA\\tLB:${sample_id}"
     """
     # Align with BWA-MEM, add read groups, pipe to samtools sort
     bwa mem -t ${task.cpus} -R '${read_group}' \\
@@ -128,13 +141,39 @@ workflow {
     def ref_dict_file = file("${params.ref_fasta}.dict")
     ref_dict_ch = ref_dict_file.exists() ? Channel.fromPath(ref_dict_file) : Channel.of(file('NO_DICT'))
 
-    // Branch based on input type
-    if (params.fastq_r1 && params.fastq_r2) {
-        // FASTQ mode: Align reads with BWA-MEM first
+    // Branch based on input type and mode (using alignment_only defined at top)
+    if (alignment_only) {
+        // Mode 1: Alignment only (FASTQ -> BAM)
+        log.info "Running Alignment-Only mode: FASTQ -> BAM"
+
+        // Check for BWA index files (also checks .64 suffix for large genomes)
+        bwa_index_files = Channel.fromPath("${params.ref_fasta}.{amb,ann,bwt,pac,sa,64.amb,64.ann,64.bwt,64.pac,64.sa}")
+            .collect()
+            .ifEmpty { error "BWA index not found. Run: bwa index ${params.ref_fasta}" }
+
+        // Create FASTQ input channels
+        fastq_r1_ch = Channel.fromPath(params.fastq_r1, checkIfExists: true)
+        fastq_r2_ch = Channel.fromPath(params.fastq_r2, checkIfExists: true)
+
+        // Combine into tuple (sample_id, read1, read2)
+        fastq_tuple = Channel.of(params.sample_id)
+            .combine(fastq_r1_ch)
+            .combine(fastq_r2_ch)
+
+        // Run alignment ONLY (no variant calling)
+        BWA_ALIGN(fastq_tuple, ref_ch, ref_fai_ch, bwa_index_files)
+
+        // Log completion
+        BWA_ALIGN.out.bam.view { sample_id, bam, bai ->
+            "Completed: ${sample_id} -> ${bam}"
+        }
+
+    } else if (params.fastq_r1 && params.fastq_r2) {
+        // Mode 2: Full pipeline (FASTQ -> BAM -> VCF)
         log.info "Running FASTQ mode: Alignment + Variant Calling"
 
-        // Check for BWA index files
-        bwa_index_files = Channel.fromPath("${params.ref_fasta}.{amb,ann,bwt,pac,sa}")
+        // Check for BWA index files (also checks .64 suffix for large genomes)
+        bwa_index_files = Channel.fromPath("${params.ref_fasta}.{amb,ann,bwt,pac,sa,64.amb,64.ann,64.bwt,64.pac,64.sa}")
             .collect()
             .ifEmpty { error "BWA index not found. Run: bwa index ${params.ref_fasta}" }
 
@@ -159,7 +198,7 @@ workflow {
         }
 
     } else if (params.bam) {
-        // BAM mode: Skip alignment (v0.1 backward compatibility)
+        // Mode 3: BAM mode (BAM -> VCF, backward compatible with v0.1.0)
         log.info "Running BAM mode: Variant Calling only"
 
         // Create BAM input channels
