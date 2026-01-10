@@ -41,8 +41,10 @@ results/
 
 # COSAP-NX outputs
 workdir/
+workdir_*/
 *.json
 !examples/sample_params.json
+comparison_results/
 
 # Testing
 .pytest_cache/

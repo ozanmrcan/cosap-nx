@@ -5,6 +5,47 @@ All notable changes to COSAP-NX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-01-10
+
+### Added
+- **VariantComparator class** - Complete comparison infrastructure matching COSAP API
+- **HaplotypeCaller support** - GATK HaplotypeCaller germline variant calling
+- **Visual comparison methods**:
+  - `draw_venn_diagram()` - Auto-detecting 2-way or 3-way Venn diagrams
+  - `draw_venn2_plot()` - 2-way Venn diagram
+  - `draw_venn3_plot()` - 3-way Venn diagram
+  - `draw_upset_plot()` - UpSet plot for set intersections
+  - `draw_similarity_plot()` - Jaccard similarity heatmap
+  - `draw_precision_recall_plot()` - Precision/recall scatter plot
+- **Metrics computation methods**:
+  - `compute_statistics()` - Variant counts (SNPs, indels, totals) per pipeline
+  - `compute_overlap()` - Pairwise overlap analysis with Jaccard similarity
+  - `compute_metrics_vs_truth()` - Precision, recall, F1 scores vs ground truth
+- **Utility methods**:
+  - `get_variants()` - Access raw variant DataFrame for custom analysis
+  - `create_intersection_bed()` - Export variant sets with set operations (`&`, `|`, `~`)
+- **Automatic chromosome name normalization** - Handles chr20 vs 20 naming differences
+- Comparison example script (`compare_deepvariant_haplotypecaller.py`)
+- Advanced comparison test script (`test_advanced_comparison.py`)
+
+### Changed
+- Version bumped to 0.2.0
+- Updated dependencies: matplotlib, seaborn, matplotlib-venn, upsetplot, scikit-learn
+
+### Technical Details
+- VariantComparator API matches COSAP's VariantComparator exactly
+- Uses bcftools for efficient VCF operations (stats, isec)
+- Lazy loading of variant data (only when visualization methods called)
+- All plots saved as PNG files (non-interactive backend)
+- Pipeline naming convention: `{mapper}_{caller}` (e.g., "bwa_deepvariant")
+
+### Validated
+- Tested comparison between DeepVariant and HaplotypeCaller on chr20 test data
+- Verified all visualization methods generate correct plots
+- Confirmed metrics match expected values (precision, recall, F1)
+- Validated BED file export with set operations
+- Chromosome normalization tested with chr20 vs 20 naming
+
 ## [0.1.2] - 2026-01-04
 
 ### Added

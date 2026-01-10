@@ -7,6 +7,14 @@ import subprocess
 import json
 import pandas as pd
 
+# Visualization imports
+import matplotlib
+matplotlib.use('Agg')  # Non-interactive backend
+import matplotlib.pyplot as plt
+import seaborn as sns
+from matplotlib_venn import venn2, venn3
+import upsetplot
+
 
 @dataclass
 class VariantFile:
@@ -298,4 +306,338 @@ class VariantComparator:
             return str(normalized_vcf)
 
         return truth_vcf
+
+    def _load_variants_dataframe(self) -> pd.DataFrame:
+        """
+        Load variants from all VCF files into a pandas DataFrame.
+
+        Uses bcftools query to efficiently extract variant positions without
+        parsing full VCF files.
+
+        Returns:
+            DataFrame with columns: variant_id, pipeline
+            variant_id format: CHROM-POS-REF-ALT
+        """
+        variants_data = []
+
+        for vf, pipeline_name in zip(self.variant_files, self.pipeline_names):
+            # Use bcftools query to extract variant IDs
+            cmd = ["bcftools", "query", "-f", "%CHROM-%POS-%REF-%ALT\\n", vf.path]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+
+            # Parse output into list of variant IDs
+            variant_ids = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+
+            # Add to data list
+            for variant_id in variant_ids:
+                variants_data.append({
+                    'variant_id': variant_id,
+                    'pipeline': pipeline_name
+                })
+
+        return pd.DataFrame(variants_data)
+
+    def draw_venn_diagram(self, output_file: str = None):
+        """
+        Draw Venn diagram automatically detecting 2 or 3 pipelines.
+
+        Args:
+            output_file: Path to save the plot (PNG). If None, uses 'venn_diagram.png'
+        """
+        if len(self.pipeline_names) == 2:
+            self.draw_venn2_plot(
+                self.pipeline_names[0],
+                self.pipeline_names[1],
+                output_file=output_file
+            )
+        elif len(self.pipeline_names) == 3:
+            self.draw_venn3_plot(
+                self.pipeline_names[0],
+                self.pipeline_names[1],
+                self.pipeline_names[2],
+                output_file=output_file
+            )
+        else:
+            raise ValueError(f"Venn diagrams support 2-3 pipelines, got {len(self.pipeline_names)}")
+
+    def draw_venn2_plot(self, pipeline1: str, pipeline2: str, output_file: str = None):
+        """
+        Draw 2-way Venn diagram comparing two pipelines.
+
+        Args:
+            pipeline1: Name of first pipeline
+            pipeline2: Name of second pipeline
+            output_file: Path to save the plot (PNG). If None, uses 'venn2_diagram.png'
+        """
+        if output_file is None:
+            output_file = "venn2_diagram.png"
+
+        # Load variant data
+        variants_df = self._load_variants_dataframe()
+
+        # Get variant sets for each pipeline - exactly like COSAP
+        venn2(
+            subsets=(
+                set(variants_df[variants_df['pipeline'] == pipeline1]['variant_id'].tolist()),
+                set(variants_df[variants_df['pipeline'] == pipeline2]['variant_id'].tolist()),
+            ),
+            set_labels=(pipeline1, pipeline2)
+        )
+        
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def draw_venn3_plot(self, pipeline1: str, pipeline2: str, pipeline3: str, output_file: str = None):
+        """
+        Draw 3-way Venn diagram comparing three pipelines.
+
+        Args:
+            pipeline1: Name of first pipeline
+            pipeline2: Name of second pipeline
+            pipeline3: Name of third pipeline
+            output_file: Path to save the plot (PNG). If None, uses 'venn3_diagram.png'
+        """
+        if output_file is None:
+            output_file = "venn3_diagram.png"
+
+        # Load variant data
+        variants_df = self._load_variants_dataframe()
+
+        # Get variant sets for each pipeline - exactly like COSAP
+        venn3(
+            subsets=(
+                set(variants_df[variants_df['pipeline'] == pipeline1]['variant_id'].tolist()),
+                set(variants_df[variants_df['pipeline'] == pipeline2]['variant_id'].tolist()),
+                set(variants_df[variants_df['pipeline'] == pipeline3]['variant_id'].tolist()),
+            ),
+            set_labels=(pipeline1, pipeline2, pipeline3)
+        )
+        
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def draw_upset_plot(self, output_file: str = None):
+        """
+        Draw UpSet plot showing all set intersections.
+
+        UpSet plots are better than Venn diagrams for visualizing intersections
+        of more than 3 sets, but work well for 2-3 sets too.
+
+        Args:
+            output_file: Path to save the plot (PNG). If None, uses 'upset_plot.png'
+        """
+        if output_file is None:
+            output_file = "upset_plot.png"
+
+        # Load variant data - COSAP approach
+        variants_df = self._load_variants_dataframe()
+
+        # Following COSAP's exact approach (lines 61-105 in comparator.py)
+        upset_df = variants_df.copy()
+        upset_df["value"] = True
+        upset_df = upset_df.pivot(
+            index="variant_id", columns="pipeline", values="value"
+        ).replace(pd.NA, False)
+
+        # Group by all pipeline columns to get intersection counts
+        upset_df = (
+            upset_df.groupby(
+                list(upset_df.columns)
+            )
+            .size()
+            .reset_index(name='count')
+        )
+
+        # Set pipelines as index
+        upset_df = upset_df.set_index(list(upset_df.columns[:-1]))
+
+        # Create UpSet plot - exactly like COSAP (no customization)
+        upset = upsetplot.UpSet(
+            upset_df['count'],
+            sort_by="-degree",
+        )
+
+        upset.plot()
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def draw_similarity_plot(self, output_file: str = None):
+        """
+        Draw heatmap showing Jaccard similarity between all pipelines.
+
+        Jaccard similarity = |A ∩ B| / |A ∪ B|
+        Perfect similarity = 1.0, no overlap = 0.0
+
+        Args:
+            output_file: Path to save the plot (PNG). If None, uses 'similarity_heatmap.png'
+        """
+        if output_file is None:
+            output_file = "similarity_heatmap.png"
+
+        # Load variant data
+        variants_df = self._load_variants_dataframe()
+
+        # Following COSAP's exact approach (lines 107-117)
+        sim_df = variants_df.copy()
+
+        sim_df = sim_df.pivot_table(
+            index="variant_id", values="pipeline", aggfunc=lambda x: ",".join(x)
+        )["pipeline"].str.get_dummies(sep=",")
+
+        # Compute Jaccard similarity matrix
+        from sklearn.metrics import pairwise_distances
+        jac_sim = 1 - pairwise_distances(sim_df.T, metric="hamming")
+        jac_sim = pd.DataFrame(jac_sim, columns=sim_df.columns, index=sim_df.columns)
+
+        # Create heatmap - exactly like COSAP
+        sns.heatmap(jac_sim, annot=True, cmap="YlGnBu")
+        
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def draw_precision_recall_plot(self, truth_vcf: str, output_file: str = None):
+        """
+        Draw scatter plot comparing precision vs recall for each pipeline.
+
+        Requires that compute_metrics_vs_truth() has been called first,
+        or will compute metrics on the fly.
+
+        Args:
+            truth_vcf: Path to ground truth VCF file
+            output_file: Path to save the plot (PNG). If None, uses 'precision_recall.png'
+        """
+        if output_file is None:
+            output_file = "precision_recall.png"
+
+        # Compute metrics if not already done (using temp directory)
+        import tempfile
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metrics_file = self.compute_metrics_vs_truth(truth_vcf, temp_dir)
+            with open(metrics_file, 'r') as f:
+                metrics_data = json.load(f)
+
+        # Extract precision and recall for each pipeline
+        precision_recall_values = {}
+        for pipeline_name, metrics in metrics_data.items():
+            precision_recall_values[pipeline_name] = (metrics['precision'], metrics['recall'])
+
+        # Create DataFrame - following COSAP (lines 163-165)
+        precision_recall_df = pd.DataFrame(precision_recall_values).T
+        precision_recall_df.columns = ["precision", "recall"]
+
+        # Create scatter plot - exactly like COSAP (lines 167-173)
+        g = sns.scatterplot(
+            data=precision_recall_df,
+            x="precision",
+            y="recall",
+            hue=precision_recall_df.index,
+            s=150,
+        )
+
+        plt.savefig(output_file, dpi=300, bbox_inches='tight')
+        plt.close()
+
+    def get_variants(self) -> pd.DataFrame:
+        """
+        Get the variants DataFrame for custom analysis.
+
+        Returns:
+            DataFrame with columns: variant_id, pipeline
+        """
+        return self._load_variants_dataframe()
+
+    def create_intersection_bed(self, query: str, output_file: str):
+        """
+        Create a BED file with variant positions from set operations.
+
+        Supports set operations on pipelines:
+        - & (intersection): variants in both
+        - | (union): variants in either
+        - ~ (difference): variants in first but not second
+
+        The BED file includes ±40bp around each variant position.
+
+        Args:
+            query: Set operation query (e.g., "bwa_deepvariant & bwa_haplotypecaller")
+            output_file: Output BED file path
+
+        Example:
+            # Get variants unique to DeepVariant
+            comparator.create_intersection_bed(
+                "bwa_deepvariant ~ bwa_haplotypecaller",
+                "deepvariant_unique.bed"
+            )
+        """
+        # Load variant data
+        variants_df = self._load_variants_dataframe()
+
+        # Set operation definitions (following COSAP's approach)
+        operations = {
+            "|": {"precedence": 1, "function": lambda x, y: x.union(y)},
+            "&": {"precedence": 2, "function": lambda x, y: x.intersection(y)},
+            "~": {"precedence": 3, "function": lambda x, y: x.difference(y)},
+        }
+
+        def shunting_yard(query):
+            """Convert infix to postfix notation using Shunting Yard algorithm."""
+            output = []
+            stack = []
+            for token in query.split():
+                if token in operations:
+                    while (
+                        stack
+                        and stack[-1] in operations
+                        and operations[token]["precedence"]
+                        <= operations[stack[-1]]["precedence"]
+                    ):
+                        output.append(stack.pop())
+                    stack.append(token)
+                else:
+                    output.append(token)
+            while stack:
+                output.append(stack.pop())
+            return output
+
+        postfix = shunting_yard(query)
+
+        # Evaluate postfix expression
+        stack = []
+        for token in postfix:
+            if token in operations:
+                y = stack.pop()
+                x = stack.pop()
+
+                # Convert pipeline names to variant sets
+                x = (
+                    set(variants_df[variants_df["pipeline"] == x]["variant_id"].tolist())
+                    if isinstance(x, str)
+                    else x
+                )
+                y = (
+                    set(variants_df[variants_df["pipeline"] == y]["variant_id"].tolist())
+                    if isinstance(y, str)
+                    else y
+                )
+
+                results = operations[token]["function"](x, y)
+                stack.append(results)
+            else:
+                stack.append(token)
+
+        results = stack[0]
+
+        # Create BED file from variant IDs
+        bed_data = []
+        for variant in results:
+            chrom, pos, ref, alt = variant.split("-")
+            start = int(pos) - 40  # ±40bp around variant
+            end = int(pos) + 40
+            bed_data.append({"CHROM": chrom, "START": start, "END": end})
+
+        bed_df = pd.DataFrame(bed_data)
+        bed_df.to_csv(output_file, sep="\t", index=False, header=False)
+
+
+
+
 

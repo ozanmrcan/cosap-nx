@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "cosap-nx"
-version = "0.1.0"
+version = "0.2.0"
 description = "COSAP-like pipeline builder with Nextflow backend"
 readme = "README.md"
 requires-python = ">=3.8"
@@ -25,6 +25,11 @@ classifiers = [
 ]
 dependencies = [
     "pandas>=1.5.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.12.0",
+    "matplotlib-venn>=0.11.0",
+    "upsetplot>=0.8.0",
+    "scikit-learn>=1.0.0",
 ]
 
 [project.optional-dependencies]

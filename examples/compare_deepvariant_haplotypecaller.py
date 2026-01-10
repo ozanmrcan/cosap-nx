@@ -20,7 +20,8 @@ DEEPVARIANT_VCF = "./workdir/results/vcf/deepvariant/NA12878_chr20.vcf.gz"
 HAPLOTYPECALLER_VCF = "./workdir_hc/results/vcf/haplotypecaller/NA12878_chr20.vcf.gz"
 
 # Optional: truth VCF for precision/recall
-TRUTH_VCF = "/home/ozan/grad_project/data/benchmark/truth_chr20_10-10.1mb.vcf.gz"
+# Update this path to your truth VCF file
+TRUTH_VCF = "./data/benchmark/truth_chr20_10-10.1mb.vcf.gz"
 
 COMPARISON_DIR = "./comparison_results"
 
@@ -52,6 +53,25 @@ def main():
         output_dir=COMPARISON_DIR
     )
     print(f"      Saved: {metrics_file}")
+
+    print("\n[4/7] Drawing Venn diagram...")
+    comparator.draw_venn_diagram(output_file=f"{COMPARISON_DIR}/venn_diagram.png")
+    print(f"      Saved: {COMPARISON_DIR}/venn_diagram.png")
+
+    print("\n[5/7] Drawing UpSet plot...")
+    comparator.draw_upset_plot(output_file=f"{COMPARISON_DIR}/upset_plot.png")
+    print(f"      Saved: {COMPARISON_DIR}/upset_plot.png")
+
+    print("\n[6/7] Drawing similarity heatmap...")
+    comparator.draw_similarity_plot(output_file=f"{COMPARISON_DIR}/similarity_heatmap.png")
+    print(f"      Saved: {COMPARISON_DIR}/similarity_heatmap.png")
+
+    print("\n[7/7] Drawing precision-recall plot...")
+    comparator.draw_precision_recall_plot(
+        truth_vcf=TRUTH_VCF,
+        output_file=f"{COMPARISON_DIR}/precision_recall.png"
+    )
+    print(f"      Saved: {COMPARISON_DIR}/precision_recall.png")
 
     print("\n" + "=" * 70)
     print(f"Done! All results saved to: {COMPARISON_DIR}")
