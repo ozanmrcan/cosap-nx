@@ -247,8 +247,8 @@ class VariantCaller:
     gvcf: bool = False
     name: Optional[str] = None
 
-    # Supported libraries in v0.1.2
-    SUPPORTED_LIBRARIES = ["deepvariant"]
+    # Supported libraries in v0.1.3
+    SUPPORTED_LIBRARIES = ["deepvariant", "haplotypecaller"]
 
     def __post_init__(self):
         # Normalize library name
@@ -261,9 +261,15 @@ class VariantCaller:
         # Validate library
         if self.library not in self.SUPPORTED_LIBRARIES:
             raise ValueError(
-                f"Library '{self.library}' not supported in v0.1.2. "
+                f"Library '{self.library}' not supported. "
                 f"Supported: {self.SUPPORTED_LIBRARIES}"
             )
+
+        # Library-specific parameter validation
+        if self.library == "haplotypecaller":
+            # HaplotypeCaller doesn't use model_type parameter
+            if "model_type" in self.params:
+                raise ValueError("HaplotypeCaller does not use 'model_type' parameter")
 
         # v0.1.2: Only germline calling
         if self.tumor_sample is not None:
@@ -509,11 +515,15 @@ class Pipeline:
             "sample_id": step.get_sample_id(),
             "ref_fasta": self.ref_fasta,
             "outdir": outdir,
-            "model_type": step.get_model_type(),
+            "variant_caller_library": step.library,
             "gvcf": step.gvcf,
             "cpus": cpus,
             "memory": memory,
         }
+
+        # Add model_type only for DeepVariant
+        if step.library == "deepvariant":
+            config["model_type"] = step.get_model_type()
 
         # Add input-specific parameters
         if isinstance(input_sample, BamReader):

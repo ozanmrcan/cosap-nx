@@ -1,11 +1,15 @@
 #!/usr/bin/env nextflow
 
 /*
- * COSAP-NX v0.1.2 - Germline Variant Calling Pipeline
+ * COSAP-NX v0.1.3 - Germline Variant Calling Pipeline
  * Modes:
  *   1. FASTQ -> BWA-MEM -> sorted BAM (alignment only)
- *   2. FASTQ -> BWA-MEM -> sorted BAM -> DeepVariant -> VCF
- *   3. BAM -> DeepVariant -> VCF (backward compatible with v0.1.0)
+ *   2. FASTQ -> BWA-MEM -> sorted BAM -> Variant Caller -> VCF
+ *   3. BAM -> Variant Caller -> VCF
+ *
+ * Supported variant callers:
+ *   - DeepVariant (google/deepvariant:1.6.0)
+ *   - GATK HaplotypeCaller (broadinstitute/gatk:4.5.0.0)
  */
 
 nextflow.enable.dsl = 2
@@ -32,10 +36,12 @@ if (!params.ref_fasta) {
 // Log pipeline info
 def input_type = params.bam ? "BAM" : "FASTQ"
 def input_files = params.bam ? params.bam : "${params.fastq_r1}, ${params.fastq_r2}"
+def variant_caller = params.variant_caller_library ?: "deepvariant"
+def model_info = variant_caller == "deepvariant" ? "- Model type   : ${params.model_type}\n  " : ""
 
 log.info """
 ╔═══════════════════════════════════════════════════════════════╗
-║                    COSAP-NX v0.1.2                            ║
+║                    COSAP-NX v0.1.3                            ║
 ║            Germline Variant Calling Pipeline                  ║
 ╚═══════════════════════════════════════════════════════════════╝
 
@@ -44,8 +50,8 @@ Parameters:
   - Input type   : ${input_type}
   - Input files  : ${input_files}
   - Reference    : ${params.ref_fasta}
-  - Model type   : ${params.model_type}
-  - Output GVCF  : ${params.gvcf}
+  - Caller       : ${variant_caller}
+  ${model_info}- Output GVCF  : ${params.gvcf}
   - Output dir   : ${params.outdir}
   - CPUs         : ${params.cpus}
   - Memory       : ${params.memory}
@@ -130,6 +136,56 @@ process DEEPVARIANT_CALL {
 }
 
 /*
+ * Process: HAPLOTYPECALLER_CALL
+ * Run GATK HaplotypeCaller for germline variant calling
+ */
+process HAPLOTYPECALLER_CALL {
+    tag "${sample_id}"
+    container 'broadinstitute/gatk:4.5.0.0'
+    cpus params.cpus
+    memory params.memory
+
+    publishDir "${params.outdir}/vcf/haplotypecaller", mode: 'copy'
+
+    input:
+    tuple val(sample_id), path(bam), path(bam_index)
+    path ref_fasta
+    path ref_fasta_fai
+    path ref_fasta_dict
+
+    output:
+    tuple val(sample_id), path("${sample_id}.vcf.gz"), path("${sample_id}.vcf.gz.tbi"), emit: vcf
+    tuple val(sample_id), path("${sample_id}.g.vcf.gz"), path("${sample_id}.g.vcf.gz.tbi"), emit: gvcf, optional: true
+
+    script:
+    def gvcf_mode = params.gvcf ? "-ERC GVCF" : ""
+    def output_file = params.gvcf ? "${sample_id}.g.vcf.gz" : "${sample_id}.vcf.gz"
+    """
+    # GATK expects dict file named without .fasta extension
+    # Create symlink: ref.dict -> ref.fasta.dict
+    DICT_LINK=\$(basename ${ref_fasta} .fasta).dict
+    ln -sf ${ref_fasta_dict} \$DICT_LINK
+
+    gatk HaplotypeCaller \\
+        -R ${ref_fasta} \\
+        -I ${bam} \\
+        -O ${output_file} \\
+        ${gvcf_mode} \\
+        --native-pair-hmm-threads ${task.cpus}
+
+    # Index output VCF
+    gatk IndexFeatureFile -I ${output_file}
+
+    # Create symlink for consistency with output expectations
+    if [ "${params.gvcf}" == "true" ]; then
+        # Create regular VCF symlink pointing to gVCF (expected by emit: vcf)
+        ln -s ${output_file} ${sample_id}.vcf.gz
+        ln -s ${output_file}.tbi ${sample_id}.vcf.gz.tbi
+    fi
+    """
+}
+
+/*
  * Main workflow
  */
 workflow {
@@ -137,9 +193,16 @@ workflow {
     ref_ch = Channel.fromPath(params.ref_fasta, checkIfExists: true)
     ref_fai_ch = Channel.fromPath("${params.ref_fasta}.fai", checkIfExists: true)
 
-    // Try to find .dict file (optional for DeepVariant)
-    def ref_dict_file = file("${params.ref_fasta}.dict")
-    ref_dict_ch = ref_dict_file.exists() ? Channel.fromPath(ref_dict_file) : Channel.of(file('NO_DICT'))
+    // Check for .dict file (required for HaplotypeCaller, optional for DeepVariant)
+    def selected_caller = params.variant_caller_library ?: "deepvariant"
+    def ref_dict_path = "${params.ref_fasta}.dict"
+    def ref_dict_file = file(ref_dict_path)
+
+    if (selected_caller == "haplotypecaller" && !ref_dict_file.exists()) {
+        error "GATK HaplotypeCaller requires a sequence dictionary file (.dict) for the reference genome.\nMissing: ${ref_dict_path}\nCreate it with: gatk CreateSequenceDictionary -R ${params.ref_fasta} -O ${ref_dict_path}"
+    }
+
+    ref_dict_ch = ref_dict_file.exists() ? Channel.fromPath(ref_dict_file, checkIfExists: true) : Channel.of(file('NO_DICT'))
 
     // Branch based on input type and mode (using alignment_only defined at top)
     if (alignment_only) {
@@ -190,11 +253,19 @@ workflow {
         BWA_ALIGN(fastq_tuple, ref_ch, ref_fai_ch, bwa_index_files)
 
         // Feed aligned BAM to variant caller
-        DEEPVARIANT_CALL(BWA_ALIGN.out.bam, ref_ch, ref_fai_ch, ref_dict_ch)
-
-        // Log completion
-        DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
-            "Completed: ${sample_id} -> ${vcf}"
+        def caller_library = params.variant_caller_library ?: "deepvariant"
+        if (caller_library == "deepvariant") {
+            DEEPVARIANT_CALL(BWA_ALIGN.out.bam, ref_ch, ref_fai_ch, ref_dict_ch)
+            DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
+                "Completed: ${sample_id} -> ${vcf}"
+            }
+        } else if (caller_library == "haplotypecaller") {
+            HAPLOTYPECALLER_CALL(BWA_ALIGN.out.bam, ref_ch, ref_fai_ch, ref_dict_ch)
+            HAPLOTYPECALLER_CALL.out.vcf.view { sample_id, vcf, tbi ->
+                "Completed: ${sample_id} -> ${vcf}"
+            }
+        } else {
+            error "Unsupported variant caller: ${caller_library}. Supported: deepvariant, haplotypecaller"
         }
 
     } else if (params.bam) {
@@ -218,21 +289,30 @@ workflow {
             .combine(bam_ch)
             .combine(bam_index_ch)
 
-        // Run DeepVariant
-        DEEPVARIANT_CALL(bam_tuple, ref_ch, ref_fai_ch, ref_dict_ch)
-
-        // Log completion
-        DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
-            "Completed: ${sample_id} -> ${vcf}"
+        // Run variant caller
+        def caller_library = params.variant_caller_library ?: "deepvariant"
+        if (caller_library == "deepvariant") {
+            DEEPVARIANT_CALL(bam_tuple, ref_ch, ref_fai_ch, ref_dict_ch)
+            DEEPVARIANT_CALL.out.vcf.view { sample_id, vcf, tbi ->
+                "Completed: ${sample_id} -> ${vcf}"
+            }
+        } else if (caller_library == "haplotypecaller") {
+            HAPLOTYPECALLER_CALL(bam_tuple, ref_ch, ref_fai_ch, ref_dict_ch)
+            HAPLOTYPECALLER_CALL.out.vcf.view { sample_id, vcf, tbi ->
+                "Completed: ${sample_id} -> ${vcf}"
+            }
+        } else {
+            error "Unsupported variant caller: ${caller_library}. Supported: deepvariant, haplotypecaller"
         }
     }
 }
 
 workflow.onComplete {
+    def caller_output_dir = params.variant_caller_library ?: "deepvariant"
     log.info """
 Pipeline completed!
   - Status    : ${workflow.success ? 'SUCCESS' : 'FAILED'}
   - Duration  : ${workflow.duration}
-  - Output    : ${params.outdir}/vcf/deepvariant/
+  - Output    : ${params.outdir}/vcf/${caller_output_dir}/
 """
 }

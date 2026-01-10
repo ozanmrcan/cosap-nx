@@ -1,0 +1,67 @@
+##fileformat=VCFv4.2
+##FILTER=<ID=PASS,Description="All filters passed">
+##FILTER=<ID=RefCall,Description="Genotyping model thinks this site is reference.">
+##FILTER=<ID=LowQual,Description="Confidence in this variant being real is below calling threshold.">
+##FILTER=<ID=NoCall,Description="Site has depth=0 resulting in no call.">
+##INFO=<ID=END,Number=1,Type=Integer,Description="End position (for use with symbolic alleles)">
+##FORMAT=<ID=GT,Number=1,Type=String,Description="Genotype">
+##FORMAT=<ID=GQ,Number=1,Type=Integer,Description="Conditional genotype quality">
+##FORMAT=<ID=DP,Number=1,Type=Integer,Description="Read depth">
+##FORMAT=<ID=MIN_DP,Number=1,Type=Integer,Description="Minimum DP observed within the GVCF block.">
+##FORMAT=<ID=AD,Number=R,Type=Integer,Description="Read depth for each allele">
+##FORMAT=<ID=VAF,Number=A,Type=Float,Description="Variant allele fractions.">
+##FORMAT=<ID=PL,Number=G,Type=Integer,Description="Phred-scaled genotype likelihoods rounded to the closest integer">
+##FORMAT=<ID=MED_DP,Number=1,Type=Integer,Description="Median DP observed within the GVCF block rounded to the nearest integer.">
+##DeepVariant_version=1.6.0
+##contig=<ID=chr20,length=63025520>
+##bcftools_isecVersion=1.19+htslib-1.19
+##bcftools_isecCommand=isec -p comparison_results/isec_outputs/bwa_deepvariant_vs_bwa_haplotypecaller ./workdir/results/vcf/deepvariant/NA12878_chr20.vcf.gz ./workdir_hc/results/vcf/haplotypecaller/NA12878_chr20.vcf.gz; Date=Sat Jan 10 23:03:24 2026
+#CHROM	POS	ID	REF	ALT	QUAL	FILTER	INFO	FORMAT	NA12878
+chr20	10002493	.	A	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:43:37:32,5:0.135135:0,46,45
+chr20	10003109	.	A	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:46:32:28,4:0.125:0,49,49
+chr20	10004222	.	C	CA	17.4	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:16:51:19,28:0.54902:17,0,21
+chr20	10004253	.	A	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:44:55:48,7:0.127273:0,46,47
+chr20	10008717	.	AT	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:40:25:23,2:0.08:0,40,47
+chr20	10008750	.	T	TAA	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:31:27:21,2:0.0740741:0,32,37
+chr20	10008921	.	C	CA	10.5	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:10:29:17,8:0.275862:10,0,34
+chr20	10009875	.	A	G	21	PASS	.	GT:GQ:DP:AD:VAF:PL	1/1:17:52:7,44:0.846154:20,18,0
+chr20	10009877	.	A	G	0.2	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:14:38:33,5:0.131579:0,14,22
+chr20	10024252	.	C	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:39:52:42,10:0.192308:0,42,41
+chr20	10024255	.	AG	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:41:50:47,3:0.06:0,43,45
+chr20	10024256	.	G	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:44:48:40,8:0.166667:0,46,47
+chr20	10024260	.	G	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:42:52:39,13:0.25:0,45,44
+chr20	10024269	.	TAG	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:43:43:38,3:0.0697674:0,45,47
+chr20	10024283	.	C	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:36:49:35,14:0.285714:0,39,39
+chr20	10024287	.	TC	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:43:48:45,3:0.0625:0,44,46
+chr20	10024288	.	C	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:40:44:33,11:0.25:0,42,43
+chr20	10024294	.	C	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:42:39:28,11:0.282051:0,43,46
+chr20	10024298	.	TCC	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:40:43:39,4:0.0930233:0,41,46
+chr20	10024299	.	CCT	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:30:32:29,2:0.0625:0,30,38
+chr20	10024300	.	CT	C,CTTT	2.8	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:3:34:17,4,4:0.117647,0.117647:0,4,17,4,8,16
+chr20	10024325	.	GA	G	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:44:21:18,3:0.142857:0,45,51
+chr20	10024326	.	AG	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:48:21:16,3:0.142857:0,49,53
+chr20	10024331	.	GC	G	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:46:22:20,2:0.0909091:0,47,50
+chr20	10024335	.	CT	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:44:20:18,2:0.1:0,45,48
+chr20	10024338	.	A	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:50:26:20,5:0.192308:0,53,53
+chr20	10024340	.	TC	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:53:26:22,3:0.115385:0,54,56
+chr20	10050161	.	A	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:43:36:30,6:0.166667:0,43,48
+chr20	10062928	.	TC	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:46:35:30,5:0.142857:0,47,50
+chr20	10062930	.	TG	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:47:39:36,3:0.0769231:0,48,50
+chr20	10062933	.	CT	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:34:32:25,6:0.1875:0,35,41
+chr20	10062934	.	TC	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:36:25:23,2:0.08:0,37,42
+chr20	10062935	.	C	CA	0.1	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:18:39:11,18:0.461538:0,17,34
+chr20	10065779	.	G	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:20:39:31,5:0.128205:0,20,30
+chr20	10065803	.	G	T	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:48:35:26,7:0.2:0,50,51
+chr20	10067026	.	AG	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:41:43:40,3:0.0697674:0,42,44
+chr20	10068162	.	ATATATATATG	A	0.8	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:8:3:0,3:1:0,7,21
+chr20	10076938	.	T	A	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:39:46:39,7:0.152174:0,41,43
+chr20	10076989	.	CA	C	0	RefCall	.	GT:GQ:DP:AD:VAF:PL	0/0:27:44:38,3:0.0681818:0,27,41
+chr20	10097437	.	TTTTC	T	14.9	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:5:20:0,20:1:13,0,4
+chr20	10098219	.	TATATATA	T	0.3	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:11:24:19,5:0.208333:0,11,30
+chr20	10098237	.	A	T	0.7	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:8:19:13,6:0.315789:0,7,25
+chr20	10098265	.	T	C	1.1	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:6:15:7,8:0.533333:0,5,34
+chr20	10098308	.	AAT	A	1.1	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:7:10:6,4:0.4:0,5,21
+chr20	10098344	.	A	G	5.2	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:5:4:2,2:0.5:3,0,29
+chr20	10098769	.	TA	T	4.6	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:5:12:10,2:0.166667:2,0,23
+chr20	10098786	.	C	T	0.7	RefCall	.	GT:GQ:DP:AD:VAF:PL	./.:8:15:13,2:0.133333:0,7,27
+chr20	10098945	.	T	C	8.1	PASS	.	GT:GQ:DP:AD:VAF:PL	0/1:8:16:11,5:0.3125:7,0,34
