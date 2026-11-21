@@ -231,6 +231,14 @@ See `examples/compare_deepvariant_haplotypecaller.py` for complete comparison wo
 | `cpus` | ✅ | ✅ | CPU cores (default: 8) |
 | `memory` | ✅ | ✅ | Memory allocation (default: 16 GB) |
 
+## Running Tests
+
+```bash
+pip install -e ".[dev]"
+pytest              # comparator + API tests, a few seconds
+pytest -m slow      # end-to-end chr20 runs, ~7 min, needs Docker and ../data
+```
+
 ## Project Structure
 
 ```
@@ -248,6 +256,8 @@ cosap-nx/
   examples/
     germline_deepvariant.py
     sample_params.json
+  tests/
+    data/            # small chr20 VCFs + truth set
 ```
 
 ## Documentation
