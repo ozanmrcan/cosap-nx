@@ -41,6 +41,10 @@ dev = [
 [project.scripts]
 cosap-nx-run = "cosap_nx.runner:main"
 
+[tool.pytest.ini_options]
+addopts = "-m 'not slow'"
+markers = ["slow: full nextflow runs on chr20 data (minutes, needs docker)"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["cosap_nx*"]
