@@ -34,7 +34,7 @@ def reads(tmp_path, sample):
 
 def test_matrix(tmp_path):
     pipeline = Pipeline()
-    for m in ["bwa", "bowtie2"]:
+    for m in ["bwa", "bwa2", "bowtie2"]:
         mapped = Mapper(library=m, input_step=reads(tmp_path, "normal"), params={"read_groups": {"SM": "normal"}})
         for c in ["deepvariant", "haplotypecaller", "strelka"]:
             pipeline.add(VariantCaller(library=c, germline=mapped))
@@ -45,6 +45,9 @@ def test_matrix(tmp_path):
         "normal_bowtie2_deepvariant.vcf.gz",
         "normal_bowtie2_haplotypecaller.vcf.gz",
         "normal_bowtie2_strelka.vcf",
+        "normal_bwa2_deepvariant.vcf.gz",
+        "normal_bwa2_haplotypecaller.vcf.gz",
+        "normal_bwa2_strelka.vcf",
         "normal_bwa_deepvariant.vcf.gz",
         "normal_bwa_haplotypecaller.vcf.gz",
         "normal_bwa_strelka.vcf",

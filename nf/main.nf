@@ -7,13 +7,14 @@
  * names the step(s) it reads from as "stage/name". Stages run in a fixed order,
  * each stage can hold any number of steps.
  *
- * Tools with a real process: bwa, deepvariant, haplotypecaller.
+ * Tools with a real process: bwa, bwa2, deepvariant, haplotypecaller.
  * Everything else uses the placeholder STEP process and only runs with -stub-run.
  */
 
 nextflow.enable.dsl = 2
 
 include { BWA             } from './modules/bwa'
+include { BWA2            } from './modules/bwa2'
 include { DEEPVARIANT     } from './modules/deepvariant'
 include { HAPLOTYPECALLER } from './modules/haplotypecaller'
 
@@ -105,7 +106,7 @@ def inputFiles(name, s) {
 workflow {
     def STAGES = ['trim', 'mapping', 'mdup', 'calibrate', 'variant_calling', 'msi', 'genefusion']
     // Tools with a real process, per stage
-    def TOOLS = [mapping: ['bwa'], variant_calling: ['deepvariant', 'haplotypecaller']]
+    def TOOLS = [mapping: ['bwa', 'bwa2'], variant_calling: ['deepvariant', 'haplotypecaller']]
 
     // Check the graph before running anything
     def known = params.inputs.keySet().collect { "inputs/${it}".toString() }
@@ -139,9 +140,11 @@ workflow {
 
     def mapping = link('mapping', done).branch { meta, files ->
         bwa  : meta.library == 'bwa'
+        bwa2 : meta.library == 'bwa2'
         other: true
     }
     def mapped = BWA(mapping.bwa, fasta, ref_index)
+        .mix(BWA2(mapping.bwa2, fasta, ref_index))
         .mix(MAPPING_STUB(mapping.other))
     done = done.mix(asRef(mapped))
 

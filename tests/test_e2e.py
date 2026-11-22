@@ -27,13 +27,14 @@ pytestmark = [
 
 @pytest.fixture(scope="module")
 def results(tmp_path_factory):
-    """BAM -> DeepVariant/HaplotypeCaller and FASTQ -> BWA -> DeepVariant/HaplotypeCaller in one run."""
+    """BAM -> DeepVariant/HaplotypeCaller and FASTQ -> BWA/BWA2 -> DeepVariant/HaplotypeCaller in one run."""
     bam = BamReader(str(BAM), name=f"{SAMPLE}_bam")
     reads = [
         FastqReader(str(FASTQ_R1), read=1, name=SAMPLE),
         FastqReader(str(FASTQ_R2), read=2, name=SAMPLE),
     ]
     bwa = Mapper(library="bwa", input_step=reads, params={"read_groups": {"SM": SAMPLE}})
+    bwa2 = Mapper(library="bwa2", input_step=reads, params={"read_groups": {"SM": SAMPLE}})
 
     pipeline = (
         Pipeline(ref_fasta=str(REF))
@@ -41,6 +42,8 @@ def results(tmp_path_factory):
         .add(VariantCaller(library="haplotypecaller", germline=bam))
         .add(VariantCaller(library="deepvariant", germline=bwa, params={"model_type": "WGS"}))
         .add(VariantCaller(library="haplotypecaller", germline=bwa))
+        .add(VariantCaller(library="deepvariant", germline=bwa2, params={"model_type": "WGS"}))
+        .add(VariantCaller(library="haplotypecaller", germline=bwa2))
     )
     workdir = tmp_path_factory.mktemp("work")
     params = pipeline.build(workdir=str(workdir), cpus=8, memory="12 GB")
@@ -86,5 +89,18 @@ def test_fastq_deepvariant(results):
 
 def test_fastq_haplotypecaller(results):
     vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bwa_haplotypecaller.vcf.gz"
+
+    assert count_records(vcf) == 16
+
+
+def test_fastq_bwa2_deepvariant(results):
+    vcf = results / "vcf" / "deepvariant" / f"{SAMPLE}_bwa2_deepvariant.vcf.gz"
+
+    assert (results / "bam" / "bwa2" / f"{SAMPLE}_bwa2.bam").exists()
+    assert count_records(vcf) == 24
+
+
+def test_fastq_bwa2_haplotypecaller(results):
+    vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bwa2_haplotypecaller.vcf.gz"
 
     assert count_records(vcf) == 16
