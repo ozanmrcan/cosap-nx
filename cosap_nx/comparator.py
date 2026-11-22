@@ -52,7 +52,7 @@ class VariantComparator:
                 - path: Path to VCF file
                 - caller: Caller name (e.g., "deepvariant", "haplotypecaller")
                 - mapper: Mapper name (e.g., "bwa")
-            bed_file: Optional BED file for region filtering (not implemented in v0.2.0)
+            bed_file: Optional BED file for region filtering (not used yet)
         """
         self.variant_files = [VariantFile(**vf) for vf in variant_files]
         self.bed_file = bed_file
@@ -62,6 +62,33 @@ class VariantComparator:
         for vf in self.variant_files:
             if not Path(vf.path).exists():
                 raise FileNotFoundError(f"VCF file not found: {vf.path}")
+
+    @classmethod
+    def from_results(cls, results_dir: str, sample: Optional[str] = None) -> "VariantComparator":
+        """
+        Comparator over the VCFs of a finished pipeline, read from <results_dir>/variants.json.
+        Only the VCFs of one sample if sample is given.
+        """
+        entries = cls.read_results(results_dir)
+        if sample is not None:
+            entries = [e for e in entries if e["sample"] == sample]
+        if not entries:
+            raise ValueError(f"No VCFs found in {results_dir}" + (f" for sample {sample}" if sample else ""))
+
+        labels = [f"{e['mapper']}_{e['caller']}" for e in entries]
+        dupes = sorted({label for label in labels if labels.count(label) > 1})
+        if dupes:
+            raise ValueError(f"More than one VCF is labeled {', '.join(dupes)}. Pick one sample with sample=.")
+
+        return cls(variant_files=[{k: e[k] for k in ["path", "caller", "mapper"]} for e in entries])
+
+    @staticmethod
+    def read_results(results_dir: str) -> List[Dict[str, str]]:
+        """The variants.json list the workflow writes: name, path, caller, mapper, sample."""
+        manifest = Path(results_dir) / "variants.json"
+        if not manifest.exists():
+            raise FileNotFoundError(f"{manifest} not found. Was the pipeline run with variant calling?")
+        return json.loads(manifest.read_text())
 
     def compute_statistics(self, output_dir: str) -> Path:
         """

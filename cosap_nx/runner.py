@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+from .comparator import VariantComparator
+
 
 class NextflowNotFoundError(Exception):
     """Raised when Nextflow is not installed or not in PATH."""
@@ -51,6 +53,8 @@ class PipelineRunner:
         profile: str = "docker",
         resume: bool = True,
         work_dir: Optional[str] = None,
+        compare: bool = False,
+        truth_vcf: Optional[str] = None,
     ) -> Path:
         """
         Execute a pipeline from a config file.
@@ -60,6 +64,8 @@ class PipelineRunner:
             profile: Nextflow profile to use (docker, singularity, etc.).
             resume: Whether to resume from cached results.
             work_dir: Nextflow work directory. Defaults to ./work.
+            compare: Compare the VCFs of each sample afterwards, into results/comparison/<sample>/.
+            truth_vcf: Also compute precision/recall/F1 against this VCF (with compare=True).
 
         Returns:
             Path to the results directory.
@@ -111,7 +117,25 @@ class PipelineRunner:
                 f"Pipeline failed with exit code {result.returncode}"
             )
 
+        if compare:
+            self.compare_results(outdir, truth_vcf)
+
         return outdir
+
+    @staticmethod
+    def compare_results(results_dir: Path, truth_vcf: Optional[str] = None) -> Path:
+        """Runs VariantComparator on each sample's VCFs. Returns results/comparison."""
+        results_dir = Path(results_dir)
+        samples = sorted({e["sample"] for e in VariantComparator.read_results(results_dir)})
+        for sample in samples:
+            out = results_dir / "comparison" / sample
+            comparator = VariantComparator.from_results(results_dir, sample=sample)
+            comparator.compute_statistics(output_dir=str(out))
+            comparator.compute_overlap(output_dir=str(out))
+            if truth_vcf:
+                comparator.compute_metrics_vs_truth(truth_vcf=truth_vcf, output_dir=str(out))
+        print(f"Comparison written to: {results_dir / 'comparison'}")
+        return results_dir / "comparison"
 
 
 def main():
@@ -140,6 +164,15 @@ def main():
         "--work-dir", "-w",
         help="Nextflow work directory"
     )
+    parser.add_argument(
+        "--compare",
+        action="store_true",
+        help="Compare the VCFs of each sample after the run"
+    )
+    parser.add_argument(
+        "--truth-vcf",
+        help="Truth VCF for precision/recall/F1 (with --compare)"
+    )
 
     args = parser.parse_args()
 
@@ -150,6 +183,8 @@ def main():
             profile=args.profile,
             resume=not args.no_resume,
             work_dir=args.work_dir,
+            compare=args.compare,
+            truth_vcf=args.truth_vcf,
         )
         print(f"\nOutput: {output_dir}")
     except (NextflowNotFoundError, PipelineExecutionError) as e:
