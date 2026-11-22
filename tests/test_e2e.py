@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from conftest import TRUTH_VCF
-from cosap_nx import BamReader, FastqReader, Mapper, Pipeline, PipelineRunner, VariantCaller, VariantComparator
+from cosap_nx import BamReader, FastqReader, Mapper, Pipeline, PipelineRunner, VariantCaller
 
 # One full Nextflow run on the chr20 inputs in ../data. Run with: pytest -m slow
 
@@ -47,7 +47,7 @@ def results(tmp_path_factory):
     )
     workdir = tmp_path_factory.mktemp("work")
     params = pipeline.build(workdir=str(workdir), cpus=8, memory="12 GB")
-    return PipelineRunner().run_pipeline(params, resume=False)
+    return PipelineRunner().run_pipeline(params, resume=False, compare=True, truth_vcf=str(TRUTH_VCF))
 
 
 def count_records(vcf, pass_only=False):
@@ -58,25 +58,25 @@ def count_records(vcf, pass_only=False):
     return len(out.splitlines())
 
 
-def f1_vs_truth(vcf, caller, tmp_path):
-    comparator = VariantComparator(variant_files=[{"path": str(vcf), "caller": caller, "mapper": "bwa"}])
-    out = comparator.compute_metrics_vs_truth(truth_vcf=str(TRUTH_VCF), output_dir=str(tmp_path / "cmp"))
-    return json.loads(out.read_text())[f"bwa_{caller}"]["f1"]
+def f1_vs_truth(results, sample, pipeline):
+    # Written by run_pipeline(compare=True)
+    metrics = results / "comparison" / sample / "metrics_vs_truth.json"
+    return json.loads(metrics.read_text())[pipeline]["f1"]
 
 
-def test_bam_deepvariant(results, tmp_path):
+def test_bam_deepvariant(results):
     vcf = results / "vcf" / "deepvariant" / f"{SAMPLE}_bam_deepvariant.vcf.gz"
 
     assert count_records(vcf) == 288
     assert count_records(vcf, pass_only=True) == 238
-    assert f1_vs_truth(vcf, "deepvariant", tmp_path) == 0.8605
+    assert f1_vs_truth(results, f"{SAMPLE}_bam", "bam_deepvariant") == 0.8605
 
 
-def test_bam_haplotypecaller(results, tmp_path):
+def test_bam_haplotypecaller(results):
     vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bam_haplotypecaller.vcf.gz"
 
     assert count_records(vcf) == 247
-    assert f1_vs_truth(vcf, "haplotypecaller", tmp_path) == 0.9359
+    assert f1_vs_truth(results, f"{SAMPLE}_bam", "bam_haplotypecaller") == 0.9359
 
 
 def test_fastq_deepvariant(results):
@@ -104,3 +104,11 @@ def test_fastq_bwa2_haplotypecaller(results):
     vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bwa2_haplotypecaller.vcf.gz"
 
     assert count_records(vcf) == 16
+
+
+def test_comparison_per_sample(results):
+    # The FASTQ sample has the 2x2: bwa/bwa2 x deepvariant/haplotypecaller
+    overlap = json.loads((results / "comparison" / SAMPLE / "overlap_summary.json").read_text())
+
+    assert len(overlap) == 6
+    assert overlap["bwa2_deepvariant_vs_bwa_deepvariant"]["jaccard_similarity"] == 1.0

@@ -3,7 +3,8 @@ import json
 import pandas as pd
 import pytest
 
-from conftest import TRUTH_VCF
+from conftest import DEEPVARIANT_VCF, HAPLOTYPECALLER_VCF, TRUTH_VCF
+from cosap_nx import PipelineRunner, VariantComparator
 
 # Expected values from the 2026-11-21 baseline run.
 
@@ -70,3 +71,44 @@ def test_intersection_bed(comparator, tmp_path, query, expected_lines):
 
     assert len(rows) == expected_lines
     assert all(int(end) - int(start) == 80 for _, start, end in rows)
+
+
+# variants.json is what the workflow writes into results/ after variant calling
+
+
+@pytest.fixture
+def results(tmp_path):
+    entries = [
+        {"name": "s_bwa_deepvariant", "path": str(DEEPVARIANT_VCF), "caller": "deepvariant", "mapper": "bwa", "sample": "s"},
+        {"name": "s_bwa_haplotypecaller", "path": str(HAPLOTYPECALLER_VCF), "caller": "haplotypecaller", "mapper": "bwa", "sample": "s"},
+        {"name": "t_bwa_deepvariant", "path": str(DEEPVARIANT_VCF), "caller": "deepvariant", "mapper": "bwa", "sample": "t"},
+    ]
+    (tmp_path / "variants.json").write_text(json.dumps(entries))
+    return tmp_path
+
+
+def test_from_results_one_sample(results):
+    comparator = VariantComparator.from_results(str(results), sample="s")
+
+    assert comparator.pipeline_names == ["bwa_deepvariant", "bwa_haplotypecaller"]
+
+
+def test_from_results_same_label_twice(results):
+    # s and t both have bwa_deepvariant
+    with pytest.raises(ValueError):
+        VariantComparator.from_results(str(results))
+
+
+def test_from_results_without_manifest(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        VariantComparator.from_results(str(tmp_path))
+
+
+def test_compare_results_per_sample(results):
+    out = PipelineRunner.compare_results(results, truth_vcf=str(TRUTH_VCF))
+
+    assert sorted(p.name for p in out.iterdir()) == ["s", "t"]
+    metrics = json.loads((out / "s" / "metrics_vs_truth.json").read_text())
+    assert metrics["bwa_deepvariant"]["f1"] == 0.8605
+    assert (out / "s" / "overlap_summary.json").exists()
+    assert (out / "t" / "variant_counts.tsv").exists()
