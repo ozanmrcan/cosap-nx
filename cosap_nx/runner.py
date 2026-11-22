@@ -62,7 +62,7 @@ class PipelineRunner:
             work_dir: Nextflow work directory. Defaults to ./work.
 
         Returns:
-            Path to the output directory.
+            Path to the results directory.
 
         Raises:
             FileNotFoundError: If config file doesn't exist.
@@ -111,9 +111,7 @@ class PipelineRunner:
                 f"Pipeline failed with exit code {result.returncode}"
             )
 
-        # Return path to VCF output
-        vcf_dir = outdir / "vcf" / "deepvariant"
-        return vcf_dir
+        return outdir
 
 
 def main():

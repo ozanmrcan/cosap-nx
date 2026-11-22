@@ -34,7 +34,7 @@ def main():
     runner = PipelineRunner()
     output_dir = runner.run_pipeline(config_path)
 
-    print(f"\nDone. Output: {WORKDIR}/results/bam/NA12878_exome.bam")
+    print(f"\nDone. Output: {WORKDIR}/results/bam/bwa/NA12878_exome_bwa.bam")
 
 
 if __name__ == "__main__":

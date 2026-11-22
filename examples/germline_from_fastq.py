@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FASTQ → VCF germline calling pipeline."""
 
-from cosap_nx import FastqReader, VariantCaller, Pipeline, PipelineRunner
+from cosap_nx import FastqReader, Mapper, VariantCaller, Pipeline, PipelineRunner
 
 
 def main():
@@ -15,9 +15,15 @@ def main():
     fastq_1 = FastqReader(fastq_r1, read=1, name="NA12878_chr20")
     fastq_2 = FastqReader(fastq_r2, read=2, name="NA12878_chr20")
 
+    mapper = Mapper(
+        library="bwa",
+        input_step=[fastq_1, fastq_2],
+        params={"read_groups": {"SM": "NA12878_chr20"}},
+    )
+
     caller = VariantCaller(
         library="deepvariant",
-        normal_sample=[fastq_1, fastq_2],
+        germline=mapper,
         params={"model_type": "WGS"},
     )
 
@@ -31,8 +37,8 @@ def main():
     output_dir = runner.run_pipeline(config_path)
 
     print(f"\nDone. Outputs:")
-    print(f"  BAM: {workdir}/results/bam/NA12878_chr20.bam")
-    print(f"  VCF: {workdir}/results/vcf/deepvariant/NA12878_chr20.vcf.gz")
+    print(f"  BAM: {workdir}/results/bam/bwa/NA12878_chr20_bwa.bam")
+    print(f"  VCF: {workdir}/results/vcf/deepvariant/NA12878_chr20_bwa_deepvariant.vcf.gz")
 
 
 if __name__ == "__main__":

@@ -16,12 +16,12 @@ To run the pipelines first:
 from cosap_nx import VariantComparator
 
 # VCF outputs from previous pipeline runs
-DEEPVARIANT_VCF = "./workdir/results/vcf/deepvariant/NA12878_chr20.vcf.gz"
-HAPLOTYPECALLER_VCF = "./workdir_hc/results/vcf/haplotypecaller/NA12878_chr20.vcf.gz"
+DEEPVARIANT_VCF = "./workdir/results/vcf/deepvariant/NA12878_chr20_deepvariant.vcf.gz"
+HAPLOTYPECALLER_VCF = "./workdir_hc/results/vcf/haplotypecaller/NA12878_chr20_haplotypecaller.vcf.gz"
 
 # Optional: truth VCF for precision/recall
 # Update this path to your truth VCF file
-TRUTH_VCF = "./data/benchmark/truth_chr20_10-10.1mb.vcf.gz"
+TRUTH_VCF = "../data/benchmark/truth_chr20_10-10.1mb.vcf.gz"
 
 COMPARISON_DIR = "./comparison_results"
 
