@@ -29,7 +29,7 @@ def main():
     # Mapper as input to VariantCaller (component chaining)
     caller = VariantCaller(
         library="deepvariant",
-        normal_sample=mapper,
+        germline=mapper,
         params={"germline_sample_name": "NA12878_exome", "model_type": "WES"},
         gvcf=True,
     )
@@ -43,9 +43,9 @@ def main():
     output_dir = runner.run_pipeline(config_path)
 
     print(f"\nDone. Outputs:")
-    print(f"  BAM:  {WORKDIR}/results/bam/NA12878_exome.bam")
-    print(f"  VCF:  {WORKDIR}/results/vcf/deepvariant/NA12878_exome.vcf.gz")
-    print(f"  gVCF: {WORKDIR}/results/vcf/deepvariant/NA12878_exome.g.vcf.gz")
+    print(f"  BAM:  {WORKDIR}/results/bam/bwa/NA12878_exome_bwa.bam")
+    print(f"  VCF:  {WORKDIR}/results/vcf/deepvariant/NA12878_exome_bwa_deepvariant.vcf.gz")
+    print(f"  gVCF: {WORKDIR}/results/vcf/deepvariant/NA12878_exome_bwa_deepvariant.g.vcf.gz")
 
 
 if __name__ == "__main__":

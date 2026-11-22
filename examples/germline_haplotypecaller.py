@@ -13,7 +13,7 @@ def main():
 
     caller = VariantCaller(
         library="haplotypecaller",
-        normal_sample=bam,
+        germline=bam,
         params={"germline_sample_name": "NA12878_chr20"},
     )
 
@@ -25,7 +25,7 @@ def main():
     runner = PipelineRunner()
     output_dir = runner.run_pipeline(config_path)
 
-    print(f"\nDone. Output: {WORKDIR}/results/vcf/haplotypecaller/NA12878_chr20.vcf.gz")
+    print(f"\nDone. Output: {WORKDIR}/results/vcf/haplotypecaller/NA12878_chr20_haplotypecaller.vcf.gz")
 
 
 if __name__ == "__main__":

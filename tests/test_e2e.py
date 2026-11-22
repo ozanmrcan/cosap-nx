@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 
 from conftest import TRUTH_VCF
-from cosap_nx import BamReader, FastqReader, Pipeline, PipelineRunner, VariantCaller, VariantComparator
+from cosap_nx import BamReader, FastqReader, Mapper, Pipeline, PipelineRunner, VariantCaller, VariantComparator
 
-# Full Nextflow runs on the chr20 inputs in ../data. Run with: pytest -m slow
+# One full Nextflow run on the chr20 inputs in ../data. Run with: pytest -m slow
 
 INPUTS = Path(__file__).parent.parent.parent / "data"
 REF = INPUTS / "refs" / "ucsc.hg19.chr20.unittest.fasta"
@@ -25,10 +25,26 @@ pytestmark = [
 ]
 
 
-def run(caller, workdir, cpus, memory):
-    params = Pipeline(ref_fasta=str(REF)).add(caller).build(workdir=str(workdir), cpus=cpus, memory=memory)
-    PipelineRunner().run_pipeline(params, resume=False)
-    return workdir / "results" / "vcf" / caller.library / f"{SAMPLE}.vcf.gz"
+@pytest.fixture(scope="module")
+def results(tmp_path_factory):
+    """BAM -> DeepVariant/HaplotypeCaller and FASTQ -> BWA -> DeepVariant/HaplotypeCaller in one run."""
+    bam = BamReader(str(BAM), name=f"{SAMPLE}_bam")
+    reads = [
+        FastqReader(str(FASTQ_R1), read=1, name=SAMPLE),
+        FastqReader(str(FASTQ_R2), read=2, name=SAMPLE),
+    ]
+    bwa = Mapper(library="bwa", input_step=reads, params={"read_groups": {"SM": SAMPLE}})
+
+    pipeline = (
+        Pipeline(ref_fasta=str(REF))
+        .add(VariantCaller(library="deepvariant", germline=bam, params={"model_type": "WGS"}))
+        .add(VariantCaller(library="haplotypecaller", germline=bam))
+        .add(VariantCaller(library="deepvariant", germline=bwa, params={"model_type": "WGS"}))
+        .add(VariantCaller(library="haplotypecaller", germline=bwa))
+    )
+    workdir = tmp_path_factory.mktemp("work")
+    params = pipeline.build(workdir=str(workdir), cpus=8, memory="12 GB")
+    return PipelineRunner().run_pipeline(params, resume=False)
 
 
 def count_records(vcf, pass_only=False):
@@ -45,39 +61,30 @@ def f1_vs_truth(vcf, caller, tmp_path):
     return json.loads(out.read_text())[f"bwa_{caller}"]["f1"]
 
 
-def test_bam_deepvariant(tmp_path):
-    caller = VariantCaller(
-        library="deepvariant",
-        normal_sample=BamReader(str(BAM), name=SAMPLE),
-        params={"germline_sample_name": SAMPLE, "model_type": "WGS"},
-    )
-    vcf = run(caller, tmp_path / "work", cpus=4, memory="12 GB")
+def test_bam_deepvariant(results, tmp_path):
+    vcf = results / "vcf" / "deepvariant" / f"{SAMPLE}_bam_deepvariant.vcf.gz"
 
     assert count_records(vcf) == 288
     assert count_records(vcf, pass_only=True) == 238
     assert f1_vs_truth(vcf, "deepvariant", tmp_path) == 0.8605
 
 
-def test_bam_haplotypecaller(tmp_path):
-    caller = VariantCaller(
-        library="haplotypecaller",
-        normal_sample=BamReader(str(BAM), name=SAMPLE),
-        params={"germline_sample_name": SAMPLE},
-    )
-    vcf = run(caller, tmp_path / "work", cpus=4, memory="8 GB")
+def test_bam_haplotypecaller(results, tmp_path):
+    vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bam_haplotypecaller.vcf.gz"
 
     assert count_records(vcf) == 247
     assert f1_vs_truth(vcf, "haplotypecaller", tmp_path) == 0.9359
 
 
-def test_fastq_deepvariant(tmp_path):
-    reads = [
-        FastqReader(str(FASTQ_R1), read=1, name=SAMPLE),
-        FastqReader(str(FASTQ_R2), read=2, name=SAMPLE),
-    ]
-    caller = VariantCaller(library="deepvariant", normal_sample=reads, params={"model_type": "WGS"})
-    vcf = run(caller, tmp_path / "work", cpus=8, memory="12 GB")
+def test_fastq_deepvariant(results):
+    vcf = results / "vcf" / "deepvariant" / f"{SAMPLE}_bwa_deepvariant.vcf.gz"
 
-    assert (tmp_path / "work" / "results" / "bam" / f"{SAMPLE}.bam").exists()
+    assert (results / "bam" / "bwa" / f"{SAMPLE}_bwa.bam").exists()
     assert count_records(vcf) == 24
     assert count_records(vcf, pass_only=True) == 23
+
+
+def test_fastq_haplotypecaller(results):
+    vcf = results / "vcf" / "haplotypecaller" / f"{SAMPLE}_bwa_haplotypecaller.vcf.gz"
+
+    assert count_records(vcf) == 16

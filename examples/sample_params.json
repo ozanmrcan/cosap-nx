@@ -1,10 +1,17 @@
 {
-  "sample_id": "NA12878_exome",
-  "bam": "/data/NA12878_exome.bam",
-  "ref_fasta": "/refs/hg38.fa",
+  "version": "0.2.0",
+  "created": "2026-11-22--15-00-00",
   "outdir": "./results",
-  "model_type": "WES",
-  "gvcf": false,
-  "cpus": 8,
-  "memory": "16 GB"
+  "defaults": { "cpus": 4, "memory": "8 GB" },
+  "references": { "fasta": "/refs/ucsc.hg19.chr20.unittest.fasta" },
+  "inputs": {
+    "NA12878_chr20": { "type": "fastq", "r1": "/data/NA12878_chr20_R1.fastq.gz", "r2": "/data/NA12878_chr20_R2.fastq.gz" }
+  },
+  "mapping": {
+    "NA12878_chr20_bwa": { "input": "inputs/NA12878_chr20", "library": "bwa", "params": { "read_groups": { "SM": "NA12878_chr20" } } }
+  },
+  "variant_calling": {
+    "NA12878_chr20_bwa_deepvariant": { "normal": "mapping/NA12878_chr20_bwa", "library": "deepvariant", "params": { "model_type": "WGS" } },
+    "NA12878_chr20_bwa_haplotypecaller": { "normal": "mapping/NA12878_chr20_bwa", "library": "haplotypecaller", "params": {} }
+  }
 }
