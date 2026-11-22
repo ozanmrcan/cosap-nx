@@ -5,10 +5,27 @@ All notable changes to COSAP-NX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.3.0] - 2026-11-22
 
 ### Added
-- pytest suite: comparator, API and end-to-end chr20 tests (`pytest -m slow` for the slow ones)
+- COSAP-style steps that point at their inputs: `Trimmer`, `Mapper`, `MDUP(spark=)`, `Recalibrator`, `VariantCaller(germline=, tumor=)`
+- Many steps per stage in one run, e.g. 2 mappers x 2 callers; the steps a step reads from are added automatically
+- BWA-MEM2 mapper (`library="bwa2"`)
+- `results/variants.json` listing every VCF with its mapper, caller and sample
+- `VariantComparator.from_results()`, and `run_pipeline(compare=True, truth_vcf=)` / `cosap-nx-run --compare` to compare each sample after a run
+- Placeholder steps for tools that aren't ported yet, runnable with `-stub-run`
+- Per-step cpus/memory, shown in the trace
+- pytest suite in three layers: fast (API, comparator), `-m stub` (workflow wiring), `-m slow` (real chr20 run)
+
+### Changed
+- `params.json` lists steps per stage and links them as `"stage/name"` instead of the old flat format
+- `VariantCaller(normal_sample=)` is now `germline=`, like COSAP
+- FASTQ input goes through a `Mapper` instead of straight into `VariantCaller`
+- `nf/main.nf` split into modules under `nf/modules/`
+- `build()` defaults to 4 CPUs / 8 GB
+
+### Removed
+- `nf/conf/base.config`
 
 ## [0.2.0] - 2026-01-10
 

@@ -52,7 +52,7 @@ class VariantComparator:
                 - path: Path to VCF file
                 - caller: Caller name (e.g., "deepvariant", "haplotypecaller")
                 - mapper: Mapper name (e.g., "bwa")
-            bed_file: Optional BED file for region filtering (not implemented in v0.2.0)
+            bed_file: Optional BED file for region filtering (not used yet)
         """
         self.variant_files = [VariantFile(**vf) for vf in variant_files]
         self.bed_file = bed_file

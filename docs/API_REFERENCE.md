@@ -1,437 +1,226 @@
 # COSAP-NX API Reference
 
-Complete reference for all COSAP-NX classes and methods.
+Everything is imported from `cosap_nx`:
+
+```python
+from cosap_nx import (
+    FastqReader, BamReader,
+    Trimmer, Mapper, MDUP, Recalibrator, VariantCaller,
+    Pipeline, PipelineRunner, VariantComparator,
+)
+```
+
+Steps point at the step(s) they read from, like in COSAP. Nothing runs until `PipelineRunner.run_pipeline()`.
 
 ---
 
-## Module: cosap_nx
+## Inputs
 
-```python
-from cosap_nx import BamReader, FastqReader, VariantCaller, Pipeline, PipelineRunner
-```
-
----
-
-## BamReader
-
-Represents an input BAM file.
-
-### Constructor
-
-```python
-BamReader(filename: str, name: str = None)
-```
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `filename` | `str` | Yes | Path to BAM file |
-| `name` | `str` | No | Sample name. If not provided, extracted from filename |
-
-### Attributes
-
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `filename` | `str` | Absolute path to BAM file |
-| `name` | `str` | Sample identifier |
-
-### Methods
-
-#### `get_output() -> str`
-
-Returns the absolute path to the BAM file.
-
-```python
-bam = BamReader("/data/sample.bam")
-print(bam.get_output())  # "/data/sample.bam"
-```
-
-#### `validate() -> None`
-
-Checks that the BAM file and its index exist. Raises `FileNotFoundError` if not found.
-
-```python
-bam = BamReader("/data/sample.bam")
-bam.validate()  # Raises FileNotFoundError if file or index missing
-```
-
-### Example
-
-```python
-from cosap_nx import BamReader
-
-# Auto-extract name from filename
-bam1 = BamReader("/data/NA12878_sorted.bam")
-print(bam1.name)  # "NA12878_sorted"
-
-# Specify custom name
-bam2 = BamReader("/data/sample.bam", name="Patient_001")
-print(bam2.name)  # "Patient_001"
-```
-
----
-
-## FastqReader
-
-**(NEW in v0.1.2)**
-
-Represents an input FASTQ file for alignment.
-
-### Constructor
+### FastqReader
 
 ```python
 FastqReader(filename: str, read: int, name: str = None, platform: str = "ILLUMINA")
 ```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `filename` | `str` | Yes | Path to FASTQ file (`.fastq` or `.fastq.gz`) |
-| `read` | `int` | Yes | Read number: `1` or `2` for paired-end sequencing |
-| `name` | `str` | No | Sample name. If not provided, auto-extracted from filename |
-| `platform` | `str` | No | Sequencing platform (default: `"ILLUMINA"`) |
+One FASTQ file. Paired-end input is a list of two readers with `read=1` and `read=2`.
 
-### Attributes
+| Argument | Description |
+|----------|-------------|
+| `filename` | Path to the FASTQ file. Must exist. |
+| `read` | 1 or 2. |
+| `name` | Sample name. If not given, taken from the filename: `sample_R1.fastq.gz` → `sample`. Give both reads the same name. |
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `filename` | `str` | Absolute path to FASTQ file |
-| `read` | `int` | Read number (1 or 2) |
-| `name` | `str` | Sample identifier |
-| `platform` | `str` | Sequencing platform |
-
-### Methods
-
-#### `get_output() -> str`
-
-Returns the absolute path to the FASTQ file.
+### BamReader
 
 ```python
-fq = FastqReader("/data/sample_R1.fastq.gz", read=1)
-print(fq.get_output())  # "/data/sample_R1.fastq.gz"
+BamReader(filename: str, name: str = None)
 ```
 
-#### `validate() -> None`
-
-Checks that the FASTQ file exists. Raises `FileNotFoundError` if not found.
-
-```python
-fq = FastqReader("/data/sample_R1.fastq.gz", read=1)
-fq.validate()  # Raises FileNotFoundError if file missing
-```
-
-### Example
-
-```python
-from cosap_nx import FastqReader
-
-# Auto-extract name from filename
-fq1 = FastqReader("/data/NA12878_R1.fastq.gz", read=1)
-print(fq1.name)  # "NA12878"
-
-# Specify custom name (must match between R1 and R2!)
-fq_r1 = FastqReader("/data/sample_1.fastq.gz", read=1, name="Patient_001")
-fq_r2 = FastqReader("/data/sample_2.fastq.gz", read=2, name="Patient_001")
-```
-
-### Important Notes
-
-- For paired-end sequencing, create **two FastqReader instances** (read=1 and read=2)
-- Both instances must have the **same `name`** (validated by VariantCaller)
-- Sample name auto-extraction removes common suffixes: `_R1`, `_1`, `.R1`, `.1`, `_R2`, `_2`, `.R2`, `.2`
-- Read number must be `1` or `2` (raises `ValueError` otherwise)
+An aligned BAM. `name` defaults to the filename without `.bam`. `build()` checks that the BAM and its index (`<bam>.bai` or `<name>.bai`) exist.
 
 ---
 
-## VariantCaller
+## Steps
 
-Configures variant calling for a sample.
+Every step has a `name`. If you don't give one, it is built from the input's name like in COSAP. Names only have to be unique within a stage, but two different steps with the same name in one stage is an error.
 
-### Constructor
+### Trimmer
+
+```python
+Trimmer(input_step: List[FastqReader], name: str = None)
+```
+
+Read trimming (fastp in COSAP). Default name: the sample name. Not supported in real runs yet.
+
+### Mapper
+
+```python
+Mapper(library: str, input_step: Union[List[FastqReader], Trimmer], params: dict = {}, name: str = None)
+```
+
+| Argument | Description |
+|----------|-------------|
+| `library` | `"bwa"` or `"bwa2"`. Other names (e.g. `"bowtie2"`) only run with `-stub-run`. |
+| `input_step` | A FASTQ pair or a `Trimmer`. |
+| `params` | Must contain `read_groups` with at least `SM`, like in COSAP. Other read group fields (`ID`, `LB`, `PL`, `PU`) are optional. |
+
+Default name: `<input>_<library>`, e.g. `sample_bwa`.
+
+### MDUP
+
+```python
+MDUP(input_step: Union[Mapper, BamReader], name: str = None, spark: bool = True)
+```
+
+Duplicate marking. `spark=True` is GATK MarkDuplicatesSpark, `False` is Picard MarkDuplicates, as in COSAP. Keeps its input's name. Not supported in real runs yet.
+
+### Recalibrator
+
+```python
+Recalibrator(input_step: Union[MDUP, Mapper, BamReader], name: str = None)
+```
+
+Base quality score recalibration (GATK BQSR). Keeps its input's name. Not supported in real runs yet.
+
+### VariantCaller
 
 ```python
 VariantCaller(
     library: str,
-    normal_sample: Union[BamReader, List[FastqReader]] = None,
-    germline: Union[BamReader, List[FastqReader]] = None,  # Alias for normal_sample
-    tumor_sample: Union[BamReader, List[FastqReader]] = None,  # Not supported in v0.1.2
-    params: Dict[str, Any] = {},
+    germline: Union[Mapper, MDUP, Recalibrator, BamReader] = None,
+    tumor: Union[Mapper, MDUP, Recalibrator, BamReader] = None,
+    params: dict = {},
+    name: str = None,
     gvcf: bool = False,
-    name: str = None
 )
 ```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `library` | `str` | Yes | Variant caller to use. v0.1.2 supports: `"deepvariant"` |
-| `normal_sample` | `BamReader` or `List[FastqReader]` | Yes | **BAM:** Single `BamReader` instance<br>**FASTQ:** List of 2 `FastqReader` instances (paired-end) |
-| `germline` | `BamReader` or `List[FastqReader]` | No | Alias for `normal_sample` (COSAP compatibility) |
-| `tumor_sample` | `BamReader` or `List[FastqReader]` | No | Not supported in v0.1.2 |
-| `params` | `dict` | No | Tool-specific parameters |
-| `gvcf` | `bool` | No | Output gVCF in addition to VCF (default: `False`) |
-| `name` | `str` | No | Step name. Auto-generated if not provided |
+| Argument | Description |
+|----------|-------------|
+| `library` | `"deepvariant"` or `"haplotypecaller"`. Others (e.g. `"mutect"`, `"strelka"`) only run with `-stub-run`. |
+| `germline` | The normal sample. Germline callers only use this one. |
+| `tumor` | The tumor sample, for somatic callers. |
+| `params` | DeepVariant: `model_type` (`WGS`, `WES` or `PACBIO`, default `WGS`). |
+| `gvcf` | DeepVariant writes a gVCF next to the VCF. HaplotypeCaller writes only the gVCF, as in COSAP. |
 
-### Supported Parameters
-
-For `library="deepvariant"`:
-
-| Parameter | Type | Values | Default | Description |
-|-----------|------|--------|---------|-------------|
-| `model_type` | `str` | `"WGS"`, `"WES"`, `"PACBIO"` | `"WGS"` | Sequencing type |
-| `germline_sample_name` | `str` | any | from BAM | Sample name in output VCF |
-
-### Methods
-
-#### `get_sample_id() -> str`
-
-Returns the sample identifier for the output VCF.
-
-#### `get_model_type() -> str`
-
-Returns the DeepVariant model type.
-
-### Example
-
-```python
-from cosap_nx import BamReader, VariantCaller
-
-bam = BamReader("/data/exome.bam")
-
-# Basic usage
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam
-)
-
-# With all options
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam,
-    params={
-        "model_type": "WES",
-        "germline_sample_name": "Sample_001"
-    },
-    gvcf=True,
-    name="exome_deepvariant"
-)
-```
+At least one of `germline` and `tumor` is required. Default name: the input names and the library joined, e.g. `sample_bwa_deepvariant` or `normal_bwa_tumor_bwa_mutect`.
 
 ---
 
 ## Pipeline
 
-Collects pipeline steps and builds configuration.
-
-### Constructor
-
 ```python
 Pipeline(ref_fasta: str = None)
 ```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `ref_fasta` | `str` | No | Path to reference FASTA (can also use `set_reference()`) |
+### `add(step) -> Pipeline`
 
-### Methods
+Adds a step. Steps it reads from are included automatically, so adding only the callers is enough. Returns the pipeline, so calls can be chained.
 
-#### `set_reference(ref_fasta: str) -> Pipeline`
+### `set_reference(ref_fasta) -> Pipeline`
 
-Set the reference genome path. Returns self for method chaining.
+Sets the reference fasta.
 
-```python
-pipeline = Pipeline()
-pipeline.set_reference("/refs/hg38.fa")
+### `build(workdir: str, cpus: int = 4, memory: str = "8 GB") -> str`
 
-# Or chain
-pipeline = Pipeline().set_reference("/refs/hg38.fa")
-```
-
-#### `add(step: VariantCaller) -> Pipeline`
-
-Add a step to the pipeline. Returns self for method chaining.
+Checks the inputs, `<ref>` and `<ref>.fai`, then writes `<workdir>/params.json` and returns its path. `cpus` and `memory` are used for every step. Nextflow's local executor refuses tasks that ask for more than the machine has.
 
 ```python
-pipeline.add(caller)
-
-# Or chain
-pipeline = Pipeline().set_reference("/refs/hg38.fa").add(caller)
-```
-
-#### `build(workdir: str, cpus: int = 8, memory: str = "16 GB") -> str`
-
-Generate the pipeline configuration file. Returns path to `params.json`.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `workdir` | `str` | required | Output directory |
-| `cpus` | `int` | `8` | CPU cores for variant calling |
-| `memory` | `str` | `"16 GB"` | Memory allocation |
-
-```python
-config_path = pipeline.build(
-    workdir="./analysis",
-    cpus=16,
-    memory="32 GB"
-)
-# Returns: "./analysis/params.json"
-```
-
-#### `get_workdir() -> Optional[str]`
-
-Returns the workdir path set during `build()`, or `None` if not yet built.
-
-### Example
-
-```python
-from cosap_nx import BamReader, VariantCaller, Pipeline
-
-bam = BamReader("/data/sample.bam")
-caller = VariantCaller(library="deepvariant", normal_sample=bam)
-
-# Method 1: Step by step
-pipeline = Pipeline()
-pipeline.set_reference("/refs/hg38.fa")
-pipeline.add(caller)
-config = pipeline.build(workdir="./output")
-
-# Method 2: Chained
-config = (
-    Pipeline()
-    .set_reference("/refs/hg38.fa")
-    .add(caller)
-    .build(workdir="./output")
-)
+pipeline = Pipeline(ref_fasta="ref.fasta")
+for m in ["bwa", "bwa2"]:
+    mapped = Mapper(library=m, input_step=reads, params={"read_groups": {"SM": "sample"}})
+    for c in ["deepvariant", "haplotypecaller"]:
+        pipeline.add(VariantCaller(library=c, germline=mapped))
+config = pipeline.build(workdir="./workdir")
 ```
 
 ---
 
 ## PipelineRunner
 
-Executes Nextflow pipelines.
-
-### Constructor
-
 ```python
 PipelineRunner(nextflow_path: str = None)
 ```
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `nextflow_path` | `str` | No | Path to Nextflow executable. Auto-detected if not provided |
+Finds `nextflow` on the PATH if no path is given (raises `NextflowNotFoundError` otherwise).
 
-### Methods
+### `run_pipeline(pipeline_config, profile="docker", resume=True, work_dir=None, compare=False, truth_vcf=None) -> Path`
 
-#### `run_pipeline(pipeline_config: str, profile: str = "docker", resume: bool = True, work_dir: str = None) -> Path`
+Runs `nextflow run nf/main.nf -params-file <config>` in the folder of the config file and returns the `results/` directory. Raises `PipelineExecutionError` if Nextflow fails.
 
-Execute the pipeline. Returns path to output directory.
+| Argument | Description |
+|----------|-------------|
+| `profile` | `docker` or `singularity`. |
+| `resume` | Pass `-resume` to reuse finished tasks. |
+| `work_dir` | Nextflow work directory (default `work/` next to the config). |
+| `compare` | Afterwards, compare each sample's VCFs into `results/comparison/<sample>/`. |
+| `truth_vcf` | With `compare`, also compute precision/recall/F1 against this VCF. |
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `pipeline_config` | `str` | required | Path to `params.json` |
-| `profile` | `str` | `"docker"` | Nextflow profile (`"docker"`, `"singularity"`) |
-| `resume` | `bool` | `True` | Resume from cached results |
-| `work_dir` | `str` | `None` | Nextflow work directory |
+### `compare_results(results_dir, truth_vcf=None) -> Path`
 
-### Exceptions
-
-| Exception | When |
-|-----------|------|
-| `NextflowNotFoundError` | Nextflow not installed or not in PATH |
-| `FileNotFoundError` | Config file doesn't exist |
-| `PipelineExecutionError` | Pipeline fails during execution |
-
-### Example
-
-```python
-from cosap_nx import PipelineRunner
-
-runner = PipelineRunner()
-
-# Basic run
-output_dir = runner.run_pipeline("./analysis/params.json")
-
-# With options
-output_dir = runner.run_pipeline(
-    pipeline_config="./analysis/params.json",
-    profile="docker",
-    resume=True,
-    work_dir="./custom_work"
-)
-
-print(f"VCF files in: {output_dir}")
-```
+The comparison step on its own, for a run that already finished. Writes `variant_counts.tsv`, `overlap_summary.json` and (with a truth VCF) `metrics_vs_truth.json` per sample.
 
 ---
 
-## Exceptions
-
-### NextflowNotFoundError
-
-Raised when Nextflow executable cannot be found.
+## VariantComparator
 
 ```python
-from cosap_nx.runner import NextflowNotFoundError
-
-try:
-    runner = PipelineRunner()
-except NextflowNotFoundError:
-    print("Please install Nextflow")
+VariantComparator(variant_files: List[dict], bed_file: str = None)
 ```
 
-### PipelineExecutionError
+Same input as COSAP's comparator: a list of `{"path", "caller", "mapper"}`. Each VCF is labelled `<mapper>_<caller>`. `bed_file` is accepted but not used.
 
-Raised when the Nextflow pipeline fails.
+### `VariantComparator.from_results(results_dir, sample=None)`
 
-```python
-from cosap_nx.runner import PipelineExecutionError
+Builds the list from `results/variants.json`. With `sample`, only that sample's VCFs are used. Raises `ValueError` if two VCFs would get the same label (e.g. two samples both have `bwa_deepvariant`); pick a sample then. VCFs that came from a BAM input get the mapper label `bam`.
 
-try:
-    runner.run_pipeline(config)
-except PipelineExecutionError as e:
-    print(f"Pipeline failed: {e}")
-```
+### Metrics
+
+| Method | Output |
+|--------|--------|
+| `compute_statistics(output_dir)` | `variant_counts.tsv`: SNPs, indels, totals |
+| `compute_overlap(output_dir)` | `overlap_summary.json`: pairwise shared/unique counts and Jaccard |
+| `compute_metrics_vs_truth(truth_vcf, output_dir)` | `metrics_vs_truth.json`: TP, FP, FN, precision, recall, F1. Handles `chr20` vs `20` naming. |
+
+### Plots
+
+`draw_venn_diagram`, `draw_venn2_plot`, `draw_venn3_plot`, `draw_upset_plot`, `draw_similarity_plot`, `draw_precision_recall_plot(truth_vcf)`. Each takes an `output_file` (PNG).
+
+### Other
+
+- `get_variants()`: all variants as a DataFrame.
+- `create_intersection_bed(query, output_file)`: export a set of variants as BED, e.g. `"bwa_deepvariant & ~bwa_haplotypecaller"`.
 
 ---
 
-## Generated Configuration (params.json)
+## params.json
 
-The `Pipeline.build()` method generates a JSON configuration:
+What `build()` writes and `nf/main.nf` reads:
 
 ```json
 {
-  "sample_id": "NA12878",
-  "bam": "/data/NA12878.bam",
-  "ref_fasta": "/refs/hg38.fa",
-  "outdir": "/analysis/results",
-  "model_type": "WGS",
-  "gvcf": false,
-  "cpus": 8,
-  "memory": "16 GB"
+  "version": "0.3.0",
+  "outdir": "/path/workdir/results",
+  "defaults": {"cpus": 4, "memory": "8 GB"},
+  "references": {"fasta": "/refs/ref.fasta"},
+  "inputs": {
+    "sample": {"type": "fastq", "r1": "...", "r2": "..."}
+  },
+  "mapping": {
+    "sample_bwa": {"input": "inputs/sample", "library": "bwa", "params": {"read_groups": {"SM": "sample"}}}
+  },
+  "variant_calling": {
+    "sample_bwa_deepvariant": {"normal": "mapping/sample_bwa", "library": "deepvariant", "params": {}}
+  }
 }
 ```
 
-This file can also be created manually and used with the CLI or direct Nextflow execution.
+Each stage (`trim`, `mapping`, `mdup`, `calibrate`, `variant_calling`) maps step names to their settings. Steps refer to their inputs as `"stage/name"`. A step can also have its own `cpus` and `memory`, which override `defaults`.
 
 ---
 
-## CLI Interface
-
-### cosap-nx-run
-
-Command-line tool for running pipelines.
+## CLI
 
 ```bash
-cosap-nx-run --config <path> [options]
-```
-
-| Option | Short | Default | Description |
-|--------|-------|---------|-------------|
-| `--config` | `-c` | required | Path to params.json |
-| `--profile` | `-p` | `docker` | Nextflow profile |
-| `--no-resume` | | | Disable resume from cache |
-| `--work-dir` | `-w` | | Custom work directory |
-
-```bash
-# Examples
-cosap-nx-run -c params.json
-cosap-nx-run -c params.json -p singularity
-cosap-nx-run -c params.json --no-resume -w /tmp/work
+cosap-nx-run --config params.json [--profile docker] [--no-resume] [--work-dir DIR] [--compare] [--truth-vcf VCF]
 ```

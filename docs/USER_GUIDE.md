@@ -1,398 +1,191 @@
 # COSAP-NX User Guide
 
-This guide explains how to use COSAP-NX to run variant calling pipelines.
+How to build and run pipelines with COSAP-NX. For every argument, see the [API reference](API_REFERENCE.md).
 
 ---
 
-## Overview
-
-COSAP-NX provides a **COSAP-like Python API** that generates and runs **Nextflow** pipelines under the hood.
+## How it works
 
 ```
-Your Python Script          COSAP-NX              Nextflow           Docker
-┌─────────────────┐    ┌──────────────┐    ┌──────────────┐    ┌─────────────┐
-│ BamReader       │───▶│ Generates    │───▶│ Executes     │───▶│ DeepVariant │
-│ VariantCaller   │    │ params.json  │    │ main.nf      │    │ Container   │
-│ Pipeline        │    │              │    │              │    │             │
-└─────────────────┘    └──────────────┘    └──────────────┘    └─────────────┘
+your script  →  params.json  →  nextflow run nf/main.nf  →  tools in containers  →  workdir/results/
 ```
 
----
+1. In Python you create steps. Each step points at the step(s) it reads from, like in COSAP.
+2. `Pipeline.build()` follows those links back to the inputs and writes `params.json`, which lists every step by stage.
+3. `PipelineRunner.run_pipeline()` runs Nextflow on that file. Stages run in a fixed order (trim → mapping → mdup → calibrate → variant_calling), and each stage can hold any number of steps.
 
-## Quick Start
+Python doesn't know which tools exist. The workflow checks that before running anything and stops with a clear error if a tool isn't supported yet.
 
-### 1. Activate the Virtual Environment
-
-Every time you open a new terminal:
+Before you start, activate the venv in `cosap-nx/`:
 
 ```bash
-cd ~/grad_project/cosap-nx
 source venv/bin/activate
 ```
 
-You'll see `(venv)` in your prompt when active.
+---
 
-### 2. Basic Pipeline Script
+## Inputs
+
+FASTQ pairs are a list of two `FastqReader`s:
+
+```python
+from cosap_nx import FastqReader, BamReader
+
+reads = [
+    FastqReader("/data/sample_R1.fastq.gz", read=1, name="sample"),
+    FastqReader("/data/sample_R2.fastq.gz", read=2, name="sample"),
+]
+```
+
+A BAM needs its index next to it:
+
+```python
+bam = BamReader("/data/sample.bam", name="sample")
+```
+
+The names are used to name everything downstream, so keep them short and unique. If a BAM and a FASTQ pair are the same sample, give them different names (e.g. `sample` and `sample_bam`). Otherwise `build()` stops because two inputs share a name.
+
+---
+
+## A single caller
 
 ```python
 from cosap_nx import BamReader, VariantCaller, Pipeline, PipelineRunner
 
-# 1. Define your input BAM file
-bam = BamReader("/path/to/sample.bam")
+bam = BamReader("/data/sample.bam", name="sample")
+caller = VariantCaller(library="deepvariant", germline=bam, params={"model_type": "WES"})
 
-# 2. Configure the variant caller
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam
-)
-
-# 3. Build the pipeline
-pipeline = Pipeline()
-pipeline.set_reference("/path/to/reference.fa")
-pipeline.add(caller)
-
-# 4. Generate config and run
-config_path = pipeline.build(workdir="./my_analysis")
-
-runner = PipelineRunner()
-runner.run_pipeline(config_path, profile="docker")
+config = Pipeline(ref_fasta="/refs/ref.fasta").add(caller).build(workdir="./analysis")
+PipelineRunner().run_pipeline(config)
 ```
+
+The VCF ends up in `analysis/results/vcf/deepvariant/sample_deepvariant.vcf.gz`.
 
 ---
 
-## Step-by-Step Explanation
+## From FASTQ
 
-### Step 1: BamReader
-
-`BamReader` wraps an input BAM file:
+A `Mapper` needs a sample name in its read groups, as in COSAP:
 
 ```python
-from cosap_nx import BamReader
+from cosap_nx import Mapper, VariantCaller, Pipeline
 
-# Basic usage - name is auto-extracted from filename
-bam = BamReader("/data/NA12878.bam")
-print(bam.name)  # "NA12878"
+mapped = Mapper(library="bwa", input_step=reads, params={"read_groups": {"SM": "sample"}})
+caller = VariantCaller(library="haplotypecaller", germline=mapped)
 
-# Custom name
-bam = BamReader("/data/sample.bam", name="Patient_001")
-print(bam.name)  # "Patient_001"
+config = Pipeline(ref_fasta="/refs/ref.fasta").add(caller).build(workdir="./analysis")
 ```
 
-**Requirements:**
-- BAM file must exist
-- BAM index must exist (`.bam.bai` or `.bai`)
+You only need to add the caller. The mapper comes with it because the caller reads from it. The BAM is kept in `results/bam/bwa/sample_bwa.bam`.
 
-### Step 1b: FastqReader (v0.1.2+)
+The reference needs a BWA index for `bwa` (`bwa index ref.fasta`) and a BWA-MEM2 index for `bwa2` (`bwa-mem2 index ref.fasta`).
 
-**NEW in v0.1.2:** You can now start from FASTQ files instead of BAM!
+---
 
-`FastqReader` wraps FASTQ files for alignment:
+## Several tools in one run
+
+This is the main difference from a fixed pipeline: any number of mappers and callers can run side by side. Expand the combinations in Python, the same way COSAP's `DNAPipeline` does:
 
 ```python
-from cosap_nx import FastqReader
+pipeline = Pipeline(ref_fasta="/refs/ref.fasta")
+for m in ["bwa", "bwa2"]:
+    mapped = Mapper(library=m, input_step=reads, params={"read_groups": {"SM": "sample"}})
+    for c in ["deepvariant", "haplotypecaller"]:
+        pipeline.add(VariantCaller(library=c, germline=mapped))
 
-# Paired-end reads (most common)
-fastq_r1 = FastqReader("/data/sample_R1.fastq.gz", read=1, name="MySample")
-fastq_r2 = FastqReader("/data/sample_R2.fastq.gz", read=2, name="MySample")
-
-# Name is auto-extracted if not provided
-fastq_r1 = FastqReader("/data/NA12878_R1.fastq.gz", read=1)
-print(fastq_r1.name)  # "NA12878"
+config = pipeline.build(workdir="./matrix")
 ```
 
-**Key points:**
-- Always create **2 FastqReader instances** for paired-end data (read=1 and read=2)
-- Both must have the **same name** (will be checked during validation)
-- FASTQ files can be gzipped (`.fastq.gz`) or uncompressed (`.fastq`)
+This is one Nextflow run with four calling steps. Each mapper runs once, and its BAM goes to both callers.
 
-**Prerequisites for FASTQ mode:**
-The reference genome must be indexed with BWA:
+---
+
+## Tumor/normal
+
+Somatic callers take both samples. The full COSAP preprocessing chain looks like this:
+
+```python
+from cosap_nx import Trimmer, Mapper, MDUP, Recalibrator, VariantCaller
+
+def preprocess(reads, sample):
+    mapped = Mapper(library="bwa", input_step=Trimmer(input_step=reads),
+                    params={"read_groups": {"SM": sample}})
+    return Recalibrator(input_step=MDUP(input_step=mapped))
+
+mutect = VariantCaller(library="mutect", germline=preprocess(normal_reads, "normal"),
+                       tumor=preprocess(tumor_reads, "tumor"))
+```
+
+The step waits until both samples are ready. Trimming, duplicate marking, BQSR and Mutect2 are not ported yet, so this pipeline only runs with `-stub-run` for now (see below).
+
+---
+
+## Comparing results
+
+Pass `compare=True` to compare each sample's VCFs after the run:
+
+```python
+results = PipelineRunner().run_pipeline(config, compare=True, truth_vcf="/data/truth.vcf.gz")
+```
+
+This writes `results/comparison/<sample>/` with variant counts, pairwise overlap and Jaccard, and, with a truth VCF, precision/recall/F1. Pipelines are labelled `<mapper>_<caller>`, e.g. `bwa2_haplotypecaller`. Calls made straight from a BAM get the mapper label `bam`.
+
+For plots, or to compare an older run, build the comparator from the results folder:
+
+```python
+from cosap_nx import VariantComparator
+
+comparator = VariantComparator.from_results("./matrix/results", sample="sample")
+comparator.draw_upset_plot(output_file="upset.png")
+comparator.draw_similarity_plot(output_file="similarity.png")
+comparator.draw_precision_recall_plot(truth_vcf="/data/truth.vcf.gz", output_file="pr.png")
+```
+
+You can also pass the VCFs by hand, as in COSAP: `VariantComparator(variant_files=[{"path": ..., "caller": ..., "mapper": ...}])`.
+
+---
+
+## Testing a pipeline without tools
+
+`-stub-run` runs every step as a placeholder that only writes which inputs it got. This takes seconds and needs no containers, and it works for tools that aren't ported yet:
 
 ```bash
-bwa index /path/to/reference.fasta
+nextflow run nf/main.nf -params-file analysis/params.json -stub-run
 ```
 
-This creates `.amb`, `.ann`, `.bwt`, `.pac`, `.sa` index files.
-
-**Example: FASTQ to VCF**
-
-```python
-from cosap_nx import FastqReader, VariantCaller, Pipeline, PipelineRunner
-
-# Define paired-end FASTQ inputs
-fastq_r1 = FastqReader("sample_R1.fastq.gz", read=1, name="MySample")
-fastq_r2 = FastqReader("sample_R2.fastq.gz", read=2, name="MySample")
-
-# Pass list of FastqReaders to VariantCaller
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=[fastq_r1, fastq_r2],  # List, not single file!
-    params={"model_type": "WGS"}
-)
-
-# Build and run (same as BAM mode)
-pipeline = Pipeline(ref_fasta="reference.fasta")
-pipeline.add(caller)
-config_path = pipeline.build(workdir="./workdir", cpus=8, memory="16 GB")
-
-runner = PipelineRunner()
-runner.run_pipeline(config_path)
-```
-
-**Outputs:**
-- Aligned BAM: `workdir/results/bam/MySample.bam`
-- Variants VCF: `workdir/results/vcf/deepvariant/MySample.vcf.gz`
-
-### Step 2: VariantCaller
-
-`VariantCaller` configures which tool to use and how.
-
-**Accepts either:**
-- **BAM input:** Single `BamReader` instance (v0.1.0 behavior)
-- **FASTQ input:** List of 2 `FastqReader` instances (v0.1.2+)
-
-```python
-from cosap_nx import VariantCaller
-
-# Option 1: BAM input
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam  # Single BamReader
-)
-
-# Option 2: FASTQ input (v0.1.2+)
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=[fastq_r1, fastq_r2]  # List of FastqReaders
-)
-
-# With custom parameters
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam,  # or [fastq_r1, fastq_r2]
-    params={
-        "model_type": "WES",           # WGS, WES, or PACBIO
-        "germline_sample_name": "NA12878"
-    },
-    gvcf=True  # Also output gVCF
-)
-```
-
-**Supported libraries (v0.1.2):**
-- `deepvariant` - Google's deep learning variant caller
-
-**Model types:**
-| Type | Use for |
-|------|---------|
-| `WGS` | Whole genome sequencing (default) |
-| `WES` | Whole exome sequencing |
-| `PACBIO` | PacBio long reads |
-
-### Step 3: Pipeline
-
-`Pipeline` collects steps and builds the configuration:
-
-```python
-from cosap_nx import Pipeline
-
-pipeline = Pipeline()
-
-# Set reference genome (required)
-pipeline.set_reference("/refs/hg38.fa")
-
-# Add variant caller step
-pipeline.add(caller)
-
-# Build configuration
-config_path = pipeline.build(
-    workdir="./my_analysis",  # Where outputs go
-    cpus=8,                   # CPUs for DeepVariant
-    memory="16 GB"            # Memory allocation
-)
-```
-
-**Reference requirements:**
-- FASTA file (`.fa` or `.fasta`)
-- Index file (`.fai`) - create with `samtools faidx ref.fa`
-
-### Step 4: PipelineRunner
-
-`PipelineRunner` executes the Nextflow workflow:
-
-```python
-from cosap_nx import PipelineRunner
-
-runner = PipelineRunner()
-
-# Run with Docker (default)
-output_dir = runner.run_pipeline(
-    pipeline_config=config_path,
-    profile="docker"
-)
-
-# Other options
-output_dir = runner.run_pipeline(
-    pipeline_config=config_path,
-    profile="docker",
-    resume=True,       # Resume from cache (default: True)
-    work_dir="./work"  # Nextflow work directory
-)
-```
-
-**Profiles:**
-- `docker` - Run tools in Docker containers (recommended)
-- `singularity` - Run tools in Singularity containers (for HPC)
+Placeholder outputs go to `results/<stage>/`.
 
 ---
 
-## Output Structure
-
-After a successful run:
+## Output
 
 ```
-my_analysis/
-├── params.json                    # Generated configuration
-├── results/
-│   ├── vcf/
-│   │   └── deepvariant/
-│   │       ├── NA12878.vcf.gz     # Variant calls
-│   │       └── NA12878.vcf.gz.tbi # VCF index
-│   └── logs/
-│       ├── trace.txt              # Execution trace
-│       ├── report.html            # Visual report
-│       └── timeline.html          # Timeline visualization
-└── work/                          # Nextflow work directory (can be deleted)
+analysis/
+  params.json
+  work/                      Nextflow's task folders, can be deleted after a run
+  results/
+    bam/<mapper>/
+    vcf/<caller>/
+    variants.json            every VCF with mapper, caller and sample
+    comparison/<sample>/     with compare=True
+    logs/
+      trace.txt              one line per task, with time, CPU and memory
+      report.html
+      timeline.html
 ```
 
 ---
 
-## Complete Examples
+## Tips
 
-### Example 1: Whole Genome Sequencing
-
-```python
-from cosap_nx import BamReader, VariantCaller, Pipeline, PipelineRunner
-
-bam = BamReader("/data/WGS_sample.bam")
-
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam,
-    params={"model_type": "WGS"}
-)
-
-pipeline = Pipeline()
-pipeline.set_reference("/refs/GRCh38.fa")
-pipeline.add(caller)
-
-config = pipeline.build(
-    workdir="./wgs_analysis",
-    cpus=16,
-    memory="32 GB"
-)
-
-runner = PipelineRunner()
-runner.run_pipeline(config, profile="docker")
-```
-
-### Example 2: Whole Exome Sequencing
-
-```python
-from cosap_nx import BamReader, VariantCaller, Pipeline, PipelineRunner
-
-bam = BamReader("/data/exome_sample.bam", name="Patient_42")
-
-caller = VariantCaller(
-    library="deepvariant",
-    normal_sample=bam,
-    params={"model_type": "WES"},
-    gvcf=True  # Also produce gVCF for joint calling
-)
-
-pipeline = Pipeline()
-pipeline.set_reference("/refs/hg38.fa")
-pipeline.add(caller)
-
-config = pipeline.build(workdir="./exome_analysis")
-
-runner = PipelineRunner()
-runner.run_pipeline(config)
-```
-
-### Example 3: Using the CLI Runner
-
-Instead of writing Python, you can run directly with a JSON config:
-
-```bash
-# Create params.json manually or from a previous run
-cosap-nx-run --config params.json --profile docker
-```
+- **Resources.** `build(cpus=..., memory=...)` sets the default for every step. Nextflow's local executor won't start a task that asks for more than the machine has. To give one step more, add `cpus`/`memory` to that step in `params.json`.
+- **Resuming.** `run_pipeline()` passes `-resume` by default, so after a failure only the unfinished steps run again.
+- **When something fails,** check the terminal output, then `results/logs/trace.txt`, then `.nextflow.log` in the workdir.
 
 ---
 
-## Running Nextflow Directly (Advanced)
+## More
 
-For debugging or manual testing, you can run Nextflow without the Python wrapper:
-
-```bash
-cd ~/grad_project/cosap-nx
-
-nextflow run nf/main.nf \
-    --bam /path/to/sample.bam \
-    --ref_fasta /path/to/reference.fa \
-    --sample_id my_sample \
-    --outdir ./results \
-    --model_type WGS \
-    -profile docker
-```
-
-Or with a params file:
-
-```bash
-nextflow run nf/main.nf \
-    -params-file params.json \
-    -profile docker
-```
-
----
-
-## Tips and Best Practices
-
-### 1. Resource Allocation
-
-DeepVariant is resource-intensive. Recommended settings:
-
-| Data Type | CPUs | Memory |
-|-----------|------|--------|
-| WES | 8 | 16 GB |
-| WGS (30x) | 16+ | 32+ GB |
-
-### 2. Resuming Failed Runs
-
-Nextflow caches intermediate results. If a run fails, just run again - it will resume from where it left off:
-
-```python
-runner.run_pipeline(config, resume=True)  # default
-```
-
-### 3. Cleaning Up
-
-The `work/` directory can get large. After a successful run:
-
-```bash
-rm -rf work/
-```
-
-### 4. Checking Logs
-
-If something fails, check:
-1. Terminal output for error messages
-2. `results/logs/trace.txt` for detailed execution trace
-3. `.nextflow.log` for Nextflow-specific logs
-
----
-
-## Next Steps
-
-- [API Reference](API_REFERENCE.md) - Detailed class and method documentation
-- [SETUP.md](SETUP.md) - Installation instructions
+- [API reference](API_REFERENCE.md)
+- [Setup](SETUP.md)
+- `examples/` for runnable scripts on the chr20 test data
